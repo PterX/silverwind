@@ -22,7 +22,6 @@ mod arc_mutex_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::sync::{Arc, Mutex};
 
-    // 自定义序列化函数
     pub fn serialize<S, T>(val: &Arc<Mutex<T>>, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -56,7 +55,7 @@ pub enum MiddleWares {
     #[serde(rename = "forward_headers")]
     ForwardHeader(ForwardHeader),
 
-    CircuitBreaker(CircuitBreaker),
+    CircuitBreaker(#[serde(with = "arc_mutex_serde")] Arc<Mutex<CircuitBreaker>>),
 }
 impl PartialEq for MiddleWares {
     fn eq(&self, other: &Self) -> bool {
@@ -71,7 +70,11 @@ impl PartialEq for MiddleWares {
             (Self::Cors(a), Self::Cors(b)) => a == b,
             (Self::Headers(a), Self::Headers(b)) => a == b,
             (Self::ForwardHeader(a), Self::ForwardHeader(b)) => a == b,
-            (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => a == b,
+            (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => {
+                let a_lock = a.lock().unwrap();
+                let b_lock = b.lock().unwrap();
+                *a_lock == *b_lock
+            }
             _ => false,
         }
     }
