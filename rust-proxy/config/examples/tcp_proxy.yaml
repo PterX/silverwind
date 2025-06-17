@@ -1,0 +1,11 @@
+log_level: debug
+servers:
+  - listen: 8084
+    protocol: tcp
+    routes:
+      - forward_to: httpbin.org:80
+        middlewares:
+          - kind: allow_deny_list
+            rules:
+              - policy: deny
+                value: 127.0.0.2

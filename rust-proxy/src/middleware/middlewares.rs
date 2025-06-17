@@ -145,7 +145,7 @@ impl MiddleWares {
                 let is_allowed = allow_deny_list.ip_is_allowed(peer_addr)?;
                 if !is_allowed {
                     let denial = Denial {
-                        status: StatusCode::FORBIDDEN, // 403
+                        status: StatusCode::FORBIDDEN,
                         headers: HeaderMap::new(),
                         body: "Access from your IP address is forbidden".to_string(),
                     };
