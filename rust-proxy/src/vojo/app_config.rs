@@ -292,19 +292,19 @@ mod tests {
     use crate::vojo::router::BaseRoute;
     use crate::vojo::router::WeightedRouteItem;
 
-    use crate::middleware::cors_config::CorsAllowHeader;
-    use crate::vojo::router::HeaderBasedRoute;
-    use crate::vojo::router::HeaderRoutingRule;
-
     use crate::middleware::allow_deny_ip::AllowType;
     use crate::middleware::allow_deny_ip::{AllowDenyIp, AllowDenyItem};
     use crate::middleware::authentication::Authentication;
+    use crate::middleware::cors_config::CorsAllowHeader;
     use crate::middleware::cors_config::CorsConfig;
     use crate::middleware::cors_config::Method;
     use crate::middleware::rate_limit::LimitLocation;
     use crate::middleware::rate_limit::Ratelimit;
+    use crate::vojo::router::HeaderBasedRoute;
+    use crate::vojo::router::HeaderRoutingRule;
     use crate::vojo::router::PollRoute;
     use crate::vojo::router::RandomRoute;
+    use std::sync::{Arc, Mutex};
 
     use crate::vojo::router::WeightBasedRoute;
     use http::HeaderValue;
@@ -491,16 +491,18 @@ mod tests {
                     key: "test".to_string(),
                     value: "test".to_string(),
                 })),
-                MiddleWares::RateLimit(Ratelimit::TokenBucket(TokenBucketRateLimit {
-                    capacity: 10,
-                    rate_per_unit: 10,
-                    scope: LimitLocation::IP(IPBasedRatelimit {
-                        value: "192.168.0.1".to_string(),
-                    }),
-                    unit: TimeUnit::Second,
-                    current_count: 10,
-                    last_update_time: SystemTime::now(),
-                })),
+                MiddleWares::RateLimit(Arc::new(Mutex::new(Ratelimit::TokenBucket(
+                    TokenBucketRateLimit {
+                        capacity: 10,
+                        rate_per_unit: 10,
+                        scope: LimitLocation::IP(IPBasedRatelimit {
+                            value: "192.168.0.1".to_string(),
+                        }),
+                        unit: TimeUnit::Second,
+                        current_count: 10,
+                        last_update_time: SystemTime::now(),
+                    },
+                )))),
                 MiddleWares::AllowDenyList(AllowDenyIp {
                     rules: vec![AllowDenyItem {
                         value: Some("192.168.0.2".to_string()),

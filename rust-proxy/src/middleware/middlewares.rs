@@ -15,11 +15,36 @@ use http_body_util::combinators::BoxBody;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::SocketAddr;
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+use std::sync::Arc;
+use std::sync::Mutex;
+
+mod arc_mutex_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::sync::{Arc, Mutex};
+
+    // 自定义序列化函数
+    pub fn serialize<S, T>(val: &Arc<Mutex<T>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        let data = val.lock().unwrap();
+        T::serialize(&*data, s)
+    }
+    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<Mutex<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        let data = T::deserialize(d)?;
+        Ok(Arc::new(Mutex::new(data)))
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "PascalCase")]
 pub enum MiddleWares {
     #[serde(rename = "rate_limit")]
-    RateLimit(Ratelimit),
+    RateLimit(#[serde(with = "arc_mutex_serde")] Arc<Mutex<Ratelimit>>),
     #[serde(rename = "authentication")]
     Authentication(Authentication),
     #[serde(rename = "allow_deny_list")]
@@ -33,6 +58,26 @@ pub enum MiddleWares {
 
     CircuitBreaker(CircuitBreaker),
 }
+impl PartialEq for MiddleWares {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::RateLimit(a), Self::RateLimit(b)) => {
+                let a_lock = a.lock().unwrap();
+                let b_lock = b.lock().unwrap();
+                *a_lock == *b_lock
+            }
+            (Self::Authentication(a), Self::Authentication(b)) => a == b,
+            (Self::AllowDenyList(a), Self::AllowDenyList(b)) => a == b,
+            (Self::Cors(a), Self::Cors(b)) => a == b,
+            (Self::Headers(a), Self::Headers(b)) => a == b,
+            (Self::ForwardHeader(a), Self::ForwardHeader(b)) => a == b,
+            (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+impl Eq for MiddleWares {}
+
 impl MiddleWares {
     pub fn is_allowed(
         &mut self,
@@ -42,7 +87,8 @@ impl MiddleWares {
         match self {
             MiddleWares::RateLimit(ratelimit) => {
                 if let Some(header_map) = headers_option {
-                    let is_allowed = !ratelimit.should_limit(header_map, peer_addr)?;
+                    let mut lock = ratelimit.lock()?;
+                    let is_allowed = !lock.should_limit(header_map, peer_addr)?;
                     if !is_allowed {
                         return Ok(is_allowed);
                     }
@@ -112,8 +158,9 @@ mod tests {
         headers.insert(header::USER_AGENT, "test-agent".parse().unwrap());
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         println!("a-----------------");
-        let mut middleware =
-            MiddleWares::RateLimit(Ratelimit::TokenBucket(TokenBucketRateLimit::default()));
+        let mut middleware = MiddleWares::RateLimit(Arc::new(Mutex::new(Ratelimit::TokenBucket(
+            TokenBucketRateLimit::default(),
+        ))));
 
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
