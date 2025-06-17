@@ -1,3 +1,4 @@
+use crate::middleware::middlewares::CheckResult;
 use crate::middleware::middlewares::MiddleWares;
 use crate::utils::uuid::get_uuid;
 use crate::vojo::anomaly_detection::AnomalyDetectionType;
@@ -151,16 +152,16 @@ impl RouteConfig {
         &mut self,
         peer_addr: &SocketAddr,
         headers_option: Option<&HeaderMap<HeaderValue>>,
-    ) -> Result<bool, AppError> {
+    ) -> Result<CheckResult, AppError> {
         if let Some(middlewares) = &mut self.middlewares {
             for middleware in middlewares.iter_mut() {
-                let is_allowed = middleware.is_allowed(peer_addr, headers_option)?;
-                if !is_allowed {
-                    return Ok(is_allowed);
+                let check_res = middleware.is_allowed(peer_addr, headers_option)?;
+                if !check_res.is_allowed() {
+                    return Ok(check_res);
                 }
             }
         }
-        Ok(true)
+        Ok(CheckResult::Allowed)
     }
 }
 

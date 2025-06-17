@@ -265,7 +265,7 @@ async fn proxy(
         )
         .await?;
     debug!("The get_destination is {:?}", handling_result);
-    if handling_result.is_none() {
+    if handling_result.is_matched() {
         return Ok(Response::builder().status(StatusCode::FORBIDDEN).body(
             Full::new(Bytes::from(common_constants::DENY_RESPONSE))
                 .map_err(AppError::from)
@@ -290,10 +290,20 @@ async fn proxy(
             "The request has been updated to websocket,the req is {:?}!",
             req
         );
-        return server_upgrade(req, handling_result, client).await;
+        return server_upgrade(
+            req,
+            handling_result
+                .get_handling_result()
+                .ok_or(AppError::from(""))?,
+            client,
+        )
+        .await;
     }
 
-    if let Some(check_request) = handling_result {
+    if handling_result.is_matched() {
+        let check_request = handling_result
+            .get_handling_result()
+            .ok_or(AppError::from("get_handling_result error"))?;
         let request_path = check_request.request_path.as_str();
         let router_destination = check_request.router_destination;
         if let Some(middlewares) = spire_context.middlewares.clone() {
@@ -527,7 +537,9 @@ mod tests {
         let mut mock_chain_trait = MockChainTrait::new();
         mock_chain_trait
             .expect_get_destination()
-            .returning(|_, _, _, _, _, _, _| Ok(None));
+            .returning(|_, _, _, _, _, _, _| {
+                Ok(crate::proxy::proxy_trait::DestinationResult::NoMatchFound)
+            });
         let result = proxy(
             8080,
             shared_config,
@@ -574,12 +586,14 @@ mod tests {
                     }),
                 )]);
 
-                Ok(Some(HandlingResult {
-                    request_path: "/test".to_string(),
-                    router_destination: RouterDestination::File(StaticFileRoute {
-                        doc_root: "./test".to_string(),
-                    }),
-                }))
+                Ok(crate::proxy::proxy_trait::DestinationResult::Matched(
+                    HandlingResult {
+                        request_path: "/test".to_string(),
+                        router_destination: RouterDestination::File(StaticFileRoute {
+                            doc_root: "./test".to_string(),
+                        }),
+                    },
+                ))
             });
         mock_chain_trait
             .expect_handle_before_request()
@@ -624,12 +638,14 @@ mod tests {
         mock_chain_trait
             .expect_get_destination()
             .returning(|_, _, _, _, _, _, _| {
-                Ok(Some(HandlingResult {
-                    request_path: "/test".to_string(),
-                    router_destination: RouterDestination::File(StaticFileRoute {
-                        doc_root: "./test".to_string(),
-                    }),
-                }))
+                Ok(crate::proxy::proxy_trait::DestinationResult::Matched(
+                    HandlingResult {
+                        request_path: "/test".to_string(),
+                        router_destination: RouterDestination::File(StaticFileRoute {
+                            doc_root: "./test".to_string(),
+                        }),
+                    },
+                ))
             });
         mock_chain_trait
             .expect_handle_before_request()

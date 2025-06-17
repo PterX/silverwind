@@ -1,4 +1,5 @@
 use crate::middleware::cors_config::CorsConfig;
+use crate::middleware::middlewares::Denial;
 use crate::middleware::middlewares::MiddleWares;
 use crate::vojo::app_error::AppError;
 use crate::vojo::router::BaseRoute;
@@ -52,7 +53,7 @@ pub trait ChainTrait {
         uri: Uri,
         peer_addr: SocketAddr,
         spire_context: &mut SpireContext,
-    ) -> Result<Option<HandlingResult>, AppError>;
+    ) -> Result<DestinationResult, AppError>;
     async fn handle_before_response(
         &self,
         middlewares: Vec<MiddleWares>,
@@ -77,6 +78,29 @@ pub struct CommonCheckRequest;
 pub struct HandlingResult {
     pub request_path: String,
     pub router_destination: RouterDestination,
+}
+
+#[derive(Debug)]
+pub enum DestinationResult {
+    Matched(HandlingResult),
+    NotAllowed(Denial),
+    NoMatchFound,
+}
+impl DestinationResult {
+    pub fn is_matched(&self) -> bool {
+        match self {
+            DestinationResult::Matched(_) => true,
+            DestinationResult::NotAllowed(_) => false,
+            DestinationResult::NoMatchFound => false,
+        }
+    }
+    pub fn get_handling_result(&self) -> Option<HandlingResult> {
+        match self {
+            DestinationResult::Matched(handling_result) => Some(handling_result.clone()),
+            DestinationResult::NotAllowed(_) => None,
+            DestinationResult::NoMatchFound => None,
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 
@@ -134,7 +158,7 @@ impl ChainTrait for CommonCheckRequest {
         uri: Uri,
         peer_addr: SocketAddr,
         spire_context: &mut SpireContext,
-    ) -> Result<Option<HandlingResult>, AppError> {
+    ) -> Result<DestinationResult, AppError> {
         let backend_path = uri
             .path_and_query()
             .ok_or(AppError::from("Path is empty"))?
@@ -152,9 +176,13 @@ impl ChainTrait for CommonCheckRequest {
             if match_result.is_none() {
                 continue;
             }
-            let is_allowed = item.is_allowed(&peer_addr, Some(headers))?;
-            if !is_allowed {
-                return Ok(None);
+            let check_res = item.is_allowed(&peer_addr, Some(headers))?;
+            if !check_res.is_allowed() {
+                return Ok(DestinationResult::NotAllowed(
+                    check_res
+                        .get_denial()
+                        .ok_or(AppError::from("get_denial cause error"))?,
+                ));
             }
             let router_destination = item.router.get_route(headers)?;
             let rest_path = match_result.ok_or("match_result is none")?;
@@ -164,7 +192,7 @@ impl ChainTrait for CommonCheckRequest {
                     let path = Path::new(&file_route.doc_root);
                     let request_path = path.join(rest_path);
                     spire_context.middlewares = item.middlewares.clone();
-                    return Ok(Some(HandlingResult {
+                    return Ok(DestinationResult::Matched(HandlingResult {
                         request_path: String::from(request_path.to_str().unwrap_or_default()),
                         router_destination: RouterDestination::File(file_route),
                     }));
@@ -172,14 +200,14 @@ impl ChainTrait for CommonCheckRequest {
                 RouterDestination::Http(base_route) => {
                     let request_path = [base_route.endpoint.as_str(), rest_path.as_str()].join("/");
                     spire_context.middlewares = item.middlewares.clone();
-                    return Ok(Some(HandlingResult {
+                    return Ok(DestinationResult::Matched(HandlingResult {
                         request_path,
                         router_destination: RouterDestination::Http(base_route.clone()),
                     }));
                 }
             }
         }
-        Ok(None)
+        Ok(DestinationResult::NoMatchFound)
     }
     fn handle_preflight(
         &self,
@@ -358,6 +386,6 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.is_none());
+        assert!(result.is_matched());
     }
 }

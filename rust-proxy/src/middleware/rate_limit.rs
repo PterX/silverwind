@@ -4,14 +4,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::constants::common_constants::DEFAULT_FIXEDWINDOW_MAP_SIZE;
 use crate::vojo::app_error::AppError;
 use core::fmt::Debug;
+use http::header;
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use ipnet::Ipv4Net;
 use iprange::IpRange;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
-
+use std::time::Duration;
+const X_RATELIMIT_LIMIT: HeaderName = HeaderName::from_static("x-ratelimit-limit");
+const X_RATELIMIT_REMAINING: HeaderName = HeaderName::from_static("x-ratelimit-remaining");
+const X_RATELIMIT_RESET: HeaderName = HeaderName::from_static("x-ratelimit-reset");
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "limiter", rename_all = "PascalCase")]
 pub enum Ratelimit {
@@ -25,7 +30,7 @@ impl Ratelimit {
         &mut self,
         headers: &HeaderMap<HeaderValue>,
         peer_addr: &SocketAddr,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<HeaderMap>, AppError> {
         match self {
             Ratelimit::TokenBucket(tb) => tb.should_limit(headers, peer_addr),
             Ratelimit::FixedWindow(fw) => fw.should_limit(headers, peer_addr),
@@ -174,9 +179,9 @@ impl TokenBucketRateLimit {
         &mut self,
         headers: &HeaderMap<HeaderValue>,
         peer_addr: &SocketAddr,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<HeaderMap>, AppError> {
         if !matched(self.scope.clone(), headers, peer_addr)? {
-            return Ok(false);
+            return Ok(None);
         }
 
         let now = SystemTime::now();
@@ -193,9 +198,36 @@ impl TokenBucketRateLimit {
 
         if self.current_count > 0 {
             self.current_count -= 1;
-            Ok(false) // Not limited
+            Ok(None) // Not limited
         } else {
-            Ok(true) // Limited
+            // --- 这是你需要修改的核心部分 ---
+            let mut response_headers = HeaderMap::new();
+
+            // 1. 计算 Retry-After: 需要等待多久才能获得下一个令牌
+            //    时间(毫秒) = 单位时间(毫秒) / 该单位时间生成的令牌数
+            let millis_for_one_token = self.unit.get_million_second() / self.rate_per_unit as u128;
+            //    Retry-After 标准使用秒，所以向上取整
+            let retry_after_seconds = (millis_for_one_token as f64 / 1000.0).ceil() as u64;
+
+            // 2. 计算 X-RateLimit-Reset: 令牌桶重置（有下一个可用令牌）的绝对时间戳
+            let reset_time =
+                self.last_update_time + Duration::from_millis(millis_for_one_token as u64);
+            let reset_timestamp = reset_time.duration_since(UNIX_EPOCH)?.as_secs();
+
+            // 3. 填充 HeaderMap
+            // X-RateLimit-Limit: 桶的总容量
+            response_headers.insert(X_RATELIMIT_LIMIT, HeaderValue::from(self.capacity));
+
+            // X-RateLimit-Remaining: 剩余令牌数，此时为 0
+            response_headers.insert(X_RATELIMIT_REMAINING, HeaderValue::from(0));
+
+            // X-RateLimit-Reset: 重置时间的 Unix 时间戳
+            response_headers.insert(X_RATELIMIT_RESET, HeaderValue::from(reset_timestamp));
+
+            // Retry-After: 建议的重试秒数
+            response_headers.insert(header::RETRY_AFTER, HeaderValue::from(retry_after_seconds));
+
+            Ok(Some(response_headers)) // 返回包含限流信息的头部
         }
     }
 }
@@ -213,9 +245,9 @@ impl FixedWindowRateLimit {
         &mut self,
         headers: &HeaderMap<HeaderValue>,
         peer_addr: &SocketAddr,
-    ) -> Result<bool, AppError> {
+    ) -> Result<Option<HeaderMap>, AppError> {
         if !matched(self.limit_location.clone(), headers, peer_addr)? {
-            return Ok(false);
+            return Ok(None);
         }
 
         let time_unit_key = get_time_key(self.unit.clone())?;
@@ -229,7 +261,28 @@ impl FixedWindowRateLimit {
         }
         let counter = self.count_map.entry(key).or_insert(0);
         *counter += 1;
-        Ok(*counter > self.rate_per_unit as i32)
+        let remaining_requests = self.rate_per_unit as i32 - *counter;
+
+        if remaining_requests >= 0 {
+            Ok(None)
+        } else {
+            let mut response_headers = HeaderMap::new();
+
+            let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+            let window_size = (self.unit.get_million_second() / 1000) as u64;
+            let reset_timestamp = (now - (now % window_size)) + window_size;
+
+            let retry_after_seconds = reset_timestamp - now;
+            response_headers.insert(
+                X_RATELIMIT_LIMIT,
+                HeaderValue::from(self.rate_per_unit as u64),
+            );
+            response_headers.insert(X_RATELIMIT_REMAINING, HeaderValue::from(0));
+            response_headers.insert(X_RATELIMIT_RESET, HeaderValue::from(reset_timestamp));
+            response_headers.insert(header::RETRY_AFTER, HeaderValue::from(retry_after_seconds));
+
+            Ok(Some(response_headers))
+        }
     }
 }
 #[cfg(test)]
@@ -255,10 +308,16 @@ mod tests {
             last_update_time: SystemTime::now(),
         };
 
-        assert!(!rate_limit.should_limit(&headers, &socket_addr).unwrap());
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(None)
+        ),);
 
         rate_limit.current_count = 0;
-        assert!(rate_limit.should_limit(&headers, &socket_addr).unwrap());
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(Some(_))
+        ));
     }
 
     #[test]
@@ -277,10 +336,18 @@ mod tests {
             count_map: HashMap::new(),
         };
 
-        assert!(!rate_limit.should_limit(&headers, &socket_addr).unwrap());
-        assert!(!rate_limit.should_limit(&headers, &socket_addr).unwrap());
-
-        assert!(rate_limit.should_limit(&headers, &socket_addr).unwrap());
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(None)
+        ));
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(None)
+        ));
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(Some(_))
+        ));
     }
 
     #[test]
@@ -299,12 +366,15 @@ mod tests {
             last_update_time: SystemTime::now(),
         };
 
-        assert!(!rate_limit.should_limit(&headers, &socket_addr).unwrap());
-
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(None)
+        ));
         let socket_addr_outside = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1)), 8080);
-        assert!(!rate_limit
-            .should_limit(&headers, &socket_addr_outside)
-            .unwrap());
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(None)
+        ));
     }
 
     #[test]
@@ -326,9 +396,15 @@ mod tests {
             last_update_time: SystemTime::now(),
         };
 
-        assert!(!rate_limit.should_limit(&headers, &socket_addr).unwrap());
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(None)
+        ));
 
         headers.insert("X-API-Key", "wrong-key".parse().unwrap());
-        assert!(!rate_limit.should_limit(&headers, &socket_addr).unwrap());
+        assert!(matches!(
+            rate_limit.should_limit(&headers, &socket_addr),
+            Ok(None)
+        ));
     }
 }

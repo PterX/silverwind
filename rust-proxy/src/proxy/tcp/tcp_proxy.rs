@@ -96,7 +96,7 @@ async fn check(
         .first()
         .ok_or("service_config_clone is empty")?;
     let is_allowed = route.clone().is_allowed(&remote_addr, None)?;
-    Ok(is_allowed)
+    Ok(is_allowed.is_allowed())
 }
 async fn get_route_cluster(
     mapping_key: String,

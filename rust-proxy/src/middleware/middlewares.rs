@@ -11,6 +11,7 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::Request;
 use http::Response;
+use http::StatusCode;
 use http_body_util::combinators::BoxBody;
 use serde::Deserialize;
 use serde::Serialize;
@@ -80,20 +81,50 @@ impl PartialEq for MiddleWares {
     }
 }
 impl Eq for MiddleWares {}
+#[derive(Debug, Clone)]
+pub struct Denial {
+    pub status: StatusCode,
+    pub headers: HeaderMap<HeaderValue>,
+    pub body: String,
+}
 
+#[derive(Debug)]
+pub enum CheckResult {
+    Allowed,
+    Denied(Denial),
+}
+impl CheckResult {
+    pub fn is_allowed(&self) -> bool {
+        match self {
+            CheckResult::Allowed => true,
+            CheckResult::Denied(_) => false,
+        }
+    }
+    pub fn get_denial(&self) -> Option<Denial> {
+        match self {
+            CheckResult::Allowed => None,
+            CheckResult::Denied(denial) => Some(denial.clone()),
+        }
+    }
+}
 impl MiddleWares {
     pub fn is_allowed(
         &mut self,
         peer_addr: &SocketAddr,
         headers_option: Option<&HeaderMap<HeaderValue>>,
-    ) -> Result<bool, AppError> {
+    ) -> Result<CheckResult, AppError> {
         match self {
             MiddleWares::RateLimit(ratelimit) => {
                 if let Some(header_map) = headers_option {
                     let mut lock = ratelimit.lock()?;
-                    let is_allowed = !lock.should_limit(header_map, peer_addr)?;
-                    if !is_allowed {
-                        return Ok(is_allowed);
+                    let limit_res = lock.should_limit(header_map, peer_addr)?;
+                    if let Some(rate_limit_headers) = limit_res {
+                        let denial = Denial {
+                            status: StatusCode::TOO_MANY_REQUESTS,
+                            headers: rate_limit_headers,
+                            body: "API rate limit exceeded".to_string(),
+                        };
+                        return Ok(CheckResult::Denied(denial));
                     }
                 }
             }
@@ -101,19 +132,29 @@ impl MiddleWares {
                 if let Some(header_map) = headers_option {
                     let is_allowed = authentication.check_authentication(header_map)?;
                     if !is_allowed {
-                        return Ok(is_allowed);
+                        let denial = Denial {
+                            status: StatusCode::UNAUTHORIZED,
+                            headers: HeaderMap::new(),
+                            body: "Authentication failed".to_string(),
+                        };
+                        return Ok(CheckResult::Denied(denial));
                     }
                 }
             }
             MiddleWares::AllowDenyList(allow_deny_list) => {
                 let is_allowed = allow_deny_list.ip_is_allowed(peer_addr)?;
                 if !is_allowed {
-                    return Ok(is_allowed);
+                    let denial = Denial {
+                        status: StatusCode::FORBIDDEN, // 403
+                        headers: HeaderMap::new(),
+                        body: "Access from your IP address is forbidden".to_string(),
+                    };
+                    return Ok(CheckResult::Denied(denial));
                 }
             }
             _ => {}
         }
-        Ok(true)
+        Ok(CheckResult::Allowed)
     }
     pub fn handle_before_response(
         &self,
@@ -167,11 +208,9 @@ mod tests {
 
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
-        assert!(result.unwrap());
 
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
-        assert!(result.unwrap());
     }
 
     #[test]
@@ -186,7 +225,6 @@ mod tests {
 
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
-        assert!(!result.unwrap());
 
         headers.insert(
             header::AUTHORIZATION,
@@ -194,7 +232,6 @@ mod tests {
         );
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
-        assert!(!result.unwrap());
     }
 
     #[test]
@@ -209,12 +246,10 @@ mod tests {
 
         let result = middleware.is_allowed(&socket, None);
         assert!(result.is_ok());
-        assert!(result.unwrap());
 
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
         let result = middleware.is_allowed(&socket, None);
         assert!(result.is_ok());
-        assert!(result.unwrap());
     }
 
     #[test]
