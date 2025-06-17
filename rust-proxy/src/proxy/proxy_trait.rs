@@ -88,17 +88,20 @@ pub enum DestinationResult {
 }
 impl DestinationResult {
     pub fn is_matched(&self) -> bool {
+        matches!(self, Self::Matched(_))
+    }
+
+    pub fn as_handling_result(&self) -> Option<&HandlingResult> {
         match self {
-            DestinationResult::Matched(_) => true,
-            DestinationResult::NotAllowed(_) => false,
-            DestinationResult::NoMatchFound => false,
+            Self::Matched(ref handling_result) => Some(handling_result),
+            _ => None,
         }
     }
-    pub fn get_handling_result(&self) -> Option<HandlingResult> {
+
+    pub fn as_denial(&self) -> Option<&Denial> {
         match self {
-            DestinationResult::Matched(handling_result) => Some(handling_result.clone()),
-            DestinationResult::NotAllowed(_) => None,
-            DestinationResult::NoMatchFound => None,
+            Self::NotAllowed(ref denial) => Some(denial),
+            _ => None,
         }
     }
 }

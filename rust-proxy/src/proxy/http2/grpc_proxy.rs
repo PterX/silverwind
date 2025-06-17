@@ -238,11 +238,11 @@ async fn request_outbound(
     if !check_result.is_matched() {
         return Err(AppError::from("The request has been denied by the proxy!"));
     }
-    let request_path = check_result
-        .get_handling_result()
+    let request_path = &check_result
+        .as_handling_result()
         .ok_or("check_result is none")?
         .request_path;
-    let url = Url::parse(&request_path)?;
+    let url = Url::parse(request_path)?;
     let cloned_url = url.clone();
     let host = cloned_url
         .host()
