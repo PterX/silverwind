@@ -2,21 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::time::Instant;
 
-/// 熔断器的内部状态
 #[derive(Debug, Clone, PartialEq)]
 enum State {
-    /// 闭合状态：允许所有请求通过，并统计成功/失败次数。
     Closed {
         failures: u64,
         total_requests: u64,
         consecutive_failures: u32,
     },
-    /// 断开状态：拒绝所有请求，直到指定时间点。
     Open {
-        /// 熔断器将在此时间点之后切换到 HalfOpen 状态
         opens_at: Instant,
     },
-    /// 半开状态：允许有限数量的探测请求通过，以确定服务是否恢复。
     HalfOpen {
         success_probes: u32,
         total_probes: u32,
@@ -31,7 +26,6 @@ impl Default for State {
         }
     }
 }
-/// 熔断器主结构体
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CircuitBreaker {
     pub failure_rate_threshold: f64,
@@ -64,7 +58,6 @@ impl CircuitBreaker {
         }
     }
 
-    /// 记录一次成功的请求
     pub fn record_success(&mut self) {
         match self.state {
             State::Closed {
