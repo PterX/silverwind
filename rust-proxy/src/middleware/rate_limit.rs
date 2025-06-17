@@ -126,19 +126,31 @@ impl Default for TokenBucketRateLimit {
 fn default_time() -> SystemTime {
     SystemTime::now()
 }
-fn get_time_key(time_unit: TimeUnit) -> Result<String, AppError> {
+fn get_window_size_ms(time_unit: TimeUnit) -> u64 {
+    match time_unit {
+        TimeUnit::MillionSecond => 1, // 假设最小单位是毫秒
+        TimeUnit::Second => 1000,
+        TimeUnit::Minute => 60_000,
+        TimeUnit::Hour => 3_600_000,
+        TimeUnit::Day => 86_400_000,
+    }
+}
+
+fn get_window_start_ms(time_unit: TimeUnit) -> Result<u64, AppError> {
     let current_time = SystemTime::now();
     let since_the_epoch = current_time.duration_since(UNIX_EPOCH)?;
-    let in_ms =
-        since_the_epoch.as_secs() * 1000 + since_the_epoch.subsec_nanos() as u64 / 1_000_000;
-    let key_u64 = match time_unit {
-        TimeUnit::MillionSecond => in_ms,
-        TimeUnit::Second => in_ms / 1000,
-        TimeUnit::Minute => in_ms / 60000,
-        TimeUnit::Hour => in_ms / 3600000,
-        TimeUnit::Day => in_ms / 86400000,
+    let now_ms = since_the_epoch.as_millis() as u64; // 使用 as_millis() 更简洁
+    let window_size = get_window_size_ms(time_unit);
+    let window_start = (now_ms / window_size) * window_size;
+    Ok(window_start)
+}
+fn get_time_key(time_unit: TimeUnit) -> Result<String, AppError> {
+    // 复用我们的核心逻辑
+    let window_start_key_num = match time_unit {
+        TimeUnit::MillionSecond => get_window_start_ms(time_unit)?,
+        _ => get_window_start_ms(time_unit.clone())? / get_window_size_ms(time_unit),
     };
-    Ok(key_u64.to_string())
+    Ok(window_start_key_num.to_string())
 }
 
 fn matched(
@@ -200,43 +212,27 @@ impl TokenBucketRateLimit {
             self.current_count -= 1;
             Ok(None) // Not limited
         } else {
-            // --- 这是你需要修改的核心部分 ---
             let mut response_headers = HeaderMap::new();
-
-            // 1. 计算 Retry-After: 需要等待多久才能获得下一个令牌
-            //    时间(毫秒) = 单位时间(毫秒) / 该单位时间生成的令牌数
             let millis_for_one_token = self.unit.get_million_second() / self.rate_per_unit as u128;
-            //    Retry-After 标准使用秒，所以向上取整
             let retry_after_seconds = (millis_for_one_token as f64 / 1000.0).ceil() as u64;
-
-            // 2. 计算 X-RateLimit-Reset: 令牌桶重置（有下一个可用令牌）的绝对时间戳
             let reset_time =
                 self.last_update_time + Duration::from_millis(millis_for_one_token as u64);
             let reset_timestamp = reset_time.duration_since(UNIX_EPOCH)?.as_secs();
-
-            // 3. 填充 HeaderMap
-            // X-RateLimit-Limit: 桶的总容量
             response_headers.insert(X_RATELIMIT_LIMIT, HeaderValue::from(self.capacity));
-
-            // X-RateLimit-Remaining: 剩余令牌数，此时为 0
             response_headers.insert(X_RATELIMIT_REMAINING, HeaderValue::from(0));
-
-            // X-RateLimit-Reset: 重置时间的 Unix 时间戳
             response_headers.insert(X_RATELIMIT_RESET, HeaderValue::from(reset_timestamp));
-
-            // Retry-After: 建议的重试秒数
             response_headers.insert(header::RETRY_AFTER, HeaderValue::from(retry_after_seconds));
 
-            Ok(Some(response_headers)) // 返回包含限流信息的头部
+            Ok(Some(response_headers))
         }
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 
 pub struct FixedWindowRateLimit {
-    pub rate_per_unit: u128,
+    pub rate_per_unit: i32,
     pub unit: TimeUnit,
-    pub limit_location: LimitLocation,
+    pub scope: LimitLocation,
     #[serde(skip_serializing, skip_deserializing)]
     pub count_map: HashMap<String, i32>,
 }
@@ -246,13 +242,12 @@ impl FixedWindowRateLimit {
         headers: &HeaderMap<HeaderValue>,
         peer_addr: &SocketAddr,
     ) -> Result<Option<HeaderMap>, AppError> {
-        if !matched(self.limit_location.clone(), headers, peer_addr)? {
+        if !matched(self.scope.clone(), headers, peer_addr)? {
             return Ok(None);
         }
-
-        let time_unit_key = get_time_key(self.unit.clone())?;
-        let location_key = self.limit_location.get_key();
-        let key = format!("{}:{}", location_key, time_unit_key);
+        let time_key = get_time_key(self.unit.clone())?;
+        let location_key = self.scope.get_key();
+        let key = format!("{}:{}", location_key, time_key);
 
         if self.count_map.len() >= DEFAULT_FIXEDWINDOW_MAP_SIZE as usize {
             if let Some(oldest_key) = self.count_map.keys().next().cloned() {
@@ -261,24 +256,24 @@ impl FixedWindowRateLimit {
         }
         let counter = self.count_map.entry(key).or_insert(0);
         *counter += 1;
-        let remaining_requests = self.rate_per_unit as i32 - *counter;
+        let remaining_requests = self.rate_per_unit - *counter;
 
         if remaining_requests >= 0 {
             Ok(None)
         } else {
             let mut response_headers = HeaderMap::new();
-
-            let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-            let window_size = (self.unit.get_million_second() / 1000) as u64;
-            let reset_timestamp = (now - (now % window_size)) + window_size;
-
-            let retry_after_seconds = reset_timestamp - now;
+            let window_start_ms = get_window_start_ms(self.unit.clone())?;
+            let window_size_ms = get_window_size_ms(self.unit.clone());
+            let reset_timestamp_ms = window_start_ms + window_size_ms;
+            let reset_timestamp_secs = reset_timestamp_ms / 1000;
+            let now_secs = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+            let retry_after_seconds = reset_timestamp_secs.saturating_sub(now_secs).max(1);
             response_headers.insert(
                 X_RATELIMIT_LIMIT,
                 HeaderValue::from(self.rate_per_unit as u64),
             );
             response_headers.insert(X_RATELIMIT_REMAINING, HeaderValue::from(0));
-            response_headers.insert(X_RATELIMIT_RESET, HeaderValue::from(reset_timestamp));
+            response_headers.insert(X_RATELIMIT_RESET, HeaderValue::from(reset_timestamp_secs));
             response_headers.insert(header::RETRY_AFTER, HeaderValue::from(retry_after_seconds));
 
             Ok(Some(response_headers))
@@ -330,7 +325,7 @@ mod tests {
         let mut rate_limit = FixedWindowRateLimit {
             rate_per_unit: 2,
             unit: TimeUnit::Second,
-            limit_location: LimitLocation::IP(IPBasedRatelimit {
+            scope: LimitLocation::IP(IPBasedRatelimit {
                 value: "127.0.0.1".to_string(),
             }),
             count_map: HashMap::new(),

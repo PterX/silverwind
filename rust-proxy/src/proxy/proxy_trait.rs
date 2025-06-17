@@ -173,7 +173,7 @@ impl ChainTrait for CommonCheckRequest {
             .ok_or(AppError::from(
                 "Can not find config by port from app config.",
             ))?;
-
+        debug!("api_service_config: {:?}", api_service);
         for item in api_service.route_configs.iter_mut() {
             let match_result = item.is_matched(backend_path, Some(headers))?;
             if match_result.is_none() {
