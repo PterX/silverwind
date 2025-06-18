@@ -111,21 +111,7 @@ pub enum RouterDestination {
     Http(BaseRoute),
     File(StaticFileRoute),
 }
-impl RouterDestination {
-    pub fn get_endpoint(&self) -> String {
-        match self {
-            RouterDestination::Http(base_route) => base_route.endpoint.clone(),
-            RouterDestination::File(static_file_route) => static_file_route.doc_root.clone(),
-        }
-    }
 
-    pub fn is_file(&self) -> bool {
-        match self {
-            RouterDestination::Http(_) => false,
-            RouterDestination::File(_) => true,
-        }
-    }
-}
 impl ChainTrait for CommonCheckRequest {
     async fn handle_before_response(
         &self,
