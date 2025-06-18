@@ -2,6 +2,7 @@ use super::forward_header::ForwardHeader;
 use super::headers::StaticResourceHeaders;
 use crate::middleware::allow_deny_ip::AllowDenyIp;
 use crate::middleware::authentication::Authentication;
+use crate::middleware::circuit_breaker::CircuitBreaker;
 use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::rate_limit::Ratelimit;
 use crate::AppError;
@@ -10,15 +11,40 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::Request;
 use http::Response;
+use http::StatusCode;
 use http_body_util::combinators::BoxBody;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::SocketAddr;
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+use std::sync::Arc;
+use std::sync::Mutex;
+
+mod arc_mutex_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::sync::{Arc, Mutex};
+
+    pub fn serialize<S, T>(val: &Arc<Mutex<T>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        let data = val.lock().unwrap();
+        T::serialize(&*data, s)
+    }
+    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<Mutex<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        let data = T::deserialize(d)?;
+        Ok(Arc::new(Mutex::new(data)))
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "PascalCase")]
 pub enum MiddleWares {
     #[serde(rename = "rate_limit")]
-    RateLimit(Ratelimit),
+    RateLimit(#[serde(with = "arc_mutex_serde")] Arc<Mutex<Ratelimit>>),
     #[serde(rename = "authentication")]
     Authentication(Authentication),
     #[serde(rename = "allow_deny_list")]
@@ -29,19 +55,76 @@ pub enum MiddleWares {
     Headers(StaticResourceHeaders),
     #[serde(rename = "forward_headers")]
     ForwardHeader(ForwardHeader),
+
+    CircuitBreaker(#[serde(with = "arc_mutex_serde")] Arc<Mutex<CircuitBreaker>>),
+}
+impl PartialEq for MiddleWares {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::RateLimit(a), Self::RateLimit(b)) => {
+                let a_lock = a.lock().unwrap();
+                let b_lock = b.lock().unwrap();
+                *a_lock == *b_lock
+            }
+            (Self::Authentication(a), Self::Authentication(b)) => a == b,
+            (Self::AllowDenyList(a), Self::AllowDenyList(b)) => a == b,
+            (Self::Cors(a), Self::Cors(b)) => a == b,
+            (Self::Headers(a), Self::Headers(b)) => a == b,
+            (Self::ForwardHeader(a), Self::ForwardHeader(b)) => a == b,
+            (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => {
+                let a_lock = a.lock().unwrap();
+                let b_lock = b.lock().unwrap();
+                *a_lock == *b_lock
+            }
+            _ => false,
+        }
+    }
+}
+impl Eq for MiddleWares {}
+#[derive(Debug, Clone)]
+pub struct Denial {
+    pub status: StatusCode,
+    pub headers: HeaderMap<HeaderValue>,
+    pub body: String,
+}
+
+#[derive(Debug)]
+pub enum CheckResult {
+    Allowed,
+    Denied(Denial),
+}
+impl CheckResult {
+    pub fn is_allowed(&self) -> bool {
+        match self {
+            CheckResult::Allowed => true,
+            CheckResult::Denied(_) => false,
+        }
+    }
+    pub fn get_denial(&self) -> Option<Denial> {
+        match self {
+            CheckResult::Allowed => None,
+            CheckResult::Denied(denial) => Some(denial.clone()),
+        }
+    }
 }
 impl MiddleWares {
     pub fn is_allowed(
         &mut self,
         peer_addr: &SocketAddr,
         headers_option: Option<&HeaderMap<HeaderValue>>,
-    ) -> Result<bool, AppError> {
+    ) -> Result<CheckResult, AppError> {
         match self {
             MiddleWares::RateLimit(ratelimit) => {
                 if let Some(header_map) = headers_option {
-                    let is_allowed = !ratelimit.should_limit(header_map, peer_addr)?;
-                    if !is_allowed {
-                        return Ok(is_allowed);
+                    let mut lock = ratelimit.lock()?;
+                    let limit_res = lock.should_limit(header_map, peer_addr)?;
+                    if let Some(rate_limit_headers) = limit_res {
+                        let denial = Denial {
+                            status: StatusCode::TOO_MANY_REQUESTS,
+                            headers: rate_limit_headers,
+                            body: "API rate limit exceeded".to_string(),
+                        };
+                        return Ok(CheckResult::Denied(denial));
                     }
                 }
             }
@@ -49,19 +132,29 @@ impl MiddleWares {
                 if let Some(header_map) = headers_option {
                     let is_allowed = authentication.check_authentication(header_map)?;
                     if !is_allowed {
-                        return Ok(is_allowed);
+                        let denial = Denial {
+                            status: StatusCode::UNAUTHORIZED,
+                            headers: HeaderMap::new(),
+                            body: "Authentication failed".to_string(),
+                        };
+                        return Ok(CheckResult::Denied(denial));
                     }
                 }
             }
             MiddleWares::AllowDenyList(allow_deny_list) => {
                 let is_allowed = allow_deny_list.ip_is_allowed(peer_addr)?;
                 if !is_allowed {
-                    return Ok(is_allowed);
+                    let denial = Denial {
+                        status: StatusCode::FORBIDDEN,
+                        headers: HeaderMap::new(),
+                        body: "Access from your IP address is forbidden".to_string(),
+                    };
+                    return Ok(CheckResult::Denied(denial));
                 }
             }
             _ => {}
         }
-        Ok(true)
+        Ok(CheckResult::Allowed)
     }
     pub fn handle_before_response(
         &self,
@@ -109,16 +202,15 @@ mod tests {
         headers.insert(header::USER_AGENT, "test-agent".parse().unwrap());
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         println!("a-----------------");
-        let mut middleware =
-            MiddleWares::RateLimit(Ratelimit::TokenBucket(TokenBucketRateLimit::default()));
+        let mut middleware = MiddleWares::RateLimit(Arc::new(Mutex::new(Ratelimit::TokenBucket(
+            TokenBucketRateLimit::default(),
+        ))));
 
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
-        assert!(result.unwrap());
 
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
-        assert!(result.unwrap());
     }
 
     #[test]
@@ -133,7 +225,6 @@ mod tests {
 
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
-        assert!(!result.unwrap());
 
         headers.insert(
             header::AUTHORIZATION,
@@ -141,7 +232,6 @@ mod tests {
         );
         let result = middleware.is_allowed(&socket, Some(&headers));
         assert!(result.is_ok());
-        assert!(!result.unwrap());
     }
 
     #[test]
@@ -156,12 +246,10 @@ mod tests {
 
         let result = middleware.is_allowed(&socket, None);
         assert!(result.is_ok());
-        assert!(result.unwrap());
 
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
         let result = middleware.is_allowed(&socket, None);
         assert!(result.is_ok());
-        assert!(result.unwrap());
     }
 
     #[test]

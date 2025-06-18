@@ -26,11 +26,16 @@ impl TcpProxy {
             let port = self.port;
             tokio::select! {
                accept_result=accept_future=>{
-                if let Ok((inbound, socket_addr))=accept_result{
-                   check(port,cloned_config.clone(),mapping_key_clone.clone(),socket_addr).await?;
+                if let Ok((mut inbound, socket_addr))=accept_result{
+                   let check_res=check(port,cloned_config.clone(),mapping_key_clone.clone(),socket_addr).await?;
+                   if !check_res{
+                    info!("The ip[{}] is not allowed!",socket_addr);
+                    inbound.shutdown().await?;
+                    continue;
+                   }
                    let transfer = transfer(inbound, mapping_key_clone.clone(),cloned_config.clone(),port).map(|r| {
                         if let Err(e) = r {
-                            println!("Failed to transfer,error is {}", e);
+                            error!("Failed to transfer,error is {}", e);
                         }
                     });
                     tokio::spawn(transfer);
@@ -52,6 +57,7 @@ async fn transfer(
     port: i32,
 ) -> Result<(), AppError> {
     let proxy_addr = get_route_cluster(mapping_key, shared_config, port).await?;
+    debug!("proxy_addr:{}", proxy_addr);
     let mut outbound = TcpStream::connect(proxy_addr).await?;
 
     let (mut ri, mut wi) = inbound.split();
@@ -96,7 +102,7 @@ async fn check(
         .first()
         .ok_or("service_config_clone is empty")?;
     let is_allowed = route.clone().is_allowed(&remote_addr, None)?;
-    Ok(is_allowed)
+    Ok(is_allowed.is_allowed())
 }
 async fn get_route_cluster(
     mapping_key: String,

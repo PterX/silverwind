@@ -2,7 +2,7 @@ use crate::constants::common_constants;
 use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
 use crate::monitor::prometheus_exporter::{get_timer_list, inc};
 use crate::proxy::http1::http_client::HttpClients;
-
+use crate::proxy::proxy_trait::DestinationResult;
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::SharedConfig;
 use bytes::Bytes;
@@ -265,13 +265,28 @@ async fn proxy(
         )
         .await?;
     debug!("The get_destination is {:?}", handling_result);
-    if handling_result.is_none() {
-        return Ok(Response::builder().status(StatusCode::FORBIDDEN).body(
-            Full::new(Bytes::from(common_constants::DENY_RESPONSE))
-                .map_err(AppError::from)
-                .boxed(),
-        )?);
-    }
+    let handling_result = match handling_result {
+        DestinationResult::Matched(hr) => hr,
+        DestinationResult::NotAllowed(denial) => {
+            debug!("Request denied: {:?}", denial);
+            let mut response = Response::builder().status(denial.status).body(
+                Full::new(Bytes::from(denial.body))
+                    .map_err(AppError::from)
+                    .boxed(),
+            )?;
+            response.headers_mut().extend(denial.headers);
+            return Ok(response);
+        }
+        DestinationResult::NoMatchFound => {
+            debug!("No match found for the request.");
+            let response = Response::builder().status(StatusCode::NOT_FOUND).body(
+                Full::new(Bytes::from("Not Found"))
+                    .map_err(AppError::from)
+                    .boxed(),
+            )?;
+            return Ok(response);
+        }
+    };
 
     if req.method() == Method::OPTIONS
         && req.headers().contains_key(header::ORIGIN)
@@ -293,58 +308,58 @@ async fn proxy(
         return server_upgrade(req, handling_result, client).await;
     }
 
-    if let Some(check_request) = handling_result {
-        let request_path = check_request.request_path.as_str();
-        let router_destination = check_request.router_destination;
-        if let Some(middlewares) = spire_context.middlewares.clone() {
-            if !middlewares.is_empty() {
-                chain_trait
-                    .handle_before_request(middlewares, remote_addr, &mut req)
-                    .await?;
-            }
+    let check_request = handling_result;
+    let request_path = check_request.request_path.as_str();
+    let router_destination = check_request.router_destination;
+    if let Some(middlewares) = spire_context.middlewares.clone() {
+        if !middlewares.is_empty() {
+            chain_trait
+                .handle_before_request(middlewares, remote_addr, &mut req)
+                .await?;
         }
-        let mut res = if router_destination.is_file() {
-            let mut parts = req.uri().clone().into_parts();
-            parts.path_and_query = Some(request_path.try_into()?);
-            *req.uri_mut() = Uri::from_parts(parts)?;
-            route_file(router_destination, req).await?
-        } else {
-            *req.uri_mut() = request_path.parse()?;
-            let host = req
-                .uri()
-                .host()
-                .ok_or("Uri to host cause error")?
-                .to_string();
-            req.headers_mut()
-                .insert(http::header::HOST, HeaderValue::from_str(&host)?);
-
-            let request_future = if request_path.contains("https") {
-                client.request_https(req, DEFAULT_HTTP_TIMEOUT)
-            } else {
-                client.request_http(req, DEFAULT_HTTP_TIMEOUT)
-            };
-            let response_result = match request_future.await {
-                Ok(response) => response.map_err(AppError::from),
-                _ => {
-                    return Err(AppError(format!(
-                        "Request time out,the uri is {}",
-                        request_path
-                    )))
-                }
-            };
-            response_result?
-                .map(|b| b.boxed())
-                .map(|item: BoxBody<Bytes, hyper::Error>| item.map_err(AppError::from).boxed())
-        };
-        if let Some(middlewares) = spire_context.middlewares {
-            if !middlewares.is_empty() {
-                chain_trait
-                    .handle_before_response(middlewares, request_path, &mut res)
-                    .await?;
-            }
-        }
-        return Ok(res);
     }
+    let mut res = if router_destination.is_file() {
+        let mut parts = req.uri().clone().into_parts();
+        parts.path_and_query = Some(request_path.try_into()?);
+        *req.uri_mut() = Uri::from_parts(parts)?;
+        route_file(router_destination, req).await?
+    } else {
+        *req.uri_mut() = request_path.parse()?;
+        let host = req
+            .uri()
+            .host()
+            .ok_or("Uri to host cause error")?
+            .to_string();
+        req.headers_mut()
+            .insert(http::header::HOST, HeaderValue::from_str(&host)?);
+
+        let request_future = if request_path.contains("https") {
+            client.request_https(req, DEFAULT_HTTP_TIMEOUT)
+        } else {
+            client.request_http(req, DEFAULT_HTTP_TIMEOUT)
+        };
+        let response_result = match request_future.await {
+            Ok(response) => response.map_err(AppError::from),
+            _ => {
+                return Err(AppError(format!(
+                    "Request time out,the uri is {}",
+                    request_path
+                )))
+            }
+        };
+        response_result?
+            .map(|b| b.boxed())
+            .map(|item: BoxBody<Bytes, hyper::Error>| item.map_err(AppError::from).boxed())
+    };
+    if let Some(middlewares) = spire_context.middlewares {
+        if !middlewares.is_empty() {
+            chain_trait
+                .handle_before_response(middlewares, request_path, &mut res)
+                .await?;
+        }
+    }
+    return Ok(res);
+
     Ok(Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body(
@@ -527,7 +542,9 @@ mod tests {
         let mut mock_chain_trait = MockChainTrait::new();
         mock_chain_trait
             .expect_get_destination()
-            .returning(|_, _, _, _, _, _, _| Ok(None));
+            .returning(|_, _, _, _, _, _, _| {
+                Ok(crate::proxy::proxy_trait::DestinationResult::NoMatchFound)
+            });
         let result = proxy(
             8080,
             shared_config,
@@ -574,12 +591,14 @@ mod tests {
                     }),
                 )]);
 
-                Ok(Some(HandlingResult {
-                    request_path: "/test".to_string(),
-                    router_destination: RouterDestination::File(StaticFileRoute {
-                        doc_root: "./test".to_string(),
-                    }),
-                }))
+                Ok(crate::proxy::proxy_trait::DestinationResult::Matched(
+                    HandlingResult {
+                        request_path: "/test".to_string(),
+                        router_destination: RouterDestination::File(StaticFileRoute {
+                            doc_root: "./test".to_string(),
+                        }),
+                    },
+                ))
             });
         mock_chain_trait
             .expect_handle_before_request()
@@ -624,12 +643,14 @@ mod tests {
         mock_chain_trait
             .expect_get_destination()
             .returning(|_, _, _, _, _, _, _| {
-                Ok(Some(HandlingResult {
-                    request_path: "/test".to_string(),
-                    router_destination: RouterDestination::File(StaticFileRoute {
-                        doc_root: "./test".to_string(),
-                    }),
-                }))
+                Ok(crate::proxy::proxy_trait::DestinationResult::Matched(
+                    HandlingResult {
+                        request_path: "/test".to_string(),
+                        router_destination: RouterDestination::File(StaticFileRoute {
+                            doc_root: "./test".to_string(),
+                        }),
+                    },
+                ))
             });
         mock_chain_trait
             .expect_handle_before_request()

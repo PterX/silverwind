@@ -1,3 +1,4 @@
+use crate::middleware::rate_limit;
 use crate::vojo::app_config::AppConfig;
 use axum::response::IntoResponse;
 use axum::response::Response;
@@ -31,6 +32,11 @@ macro_rules! app_error {
 impl From<&str> for AppError {
     fn from(s: &str) -> Self {
         AppError(s.to_string())
+    }
+}
+impl From<std::sync::PoisonError<std::sync::MutexGuard<'_, rate_limit::Ratelimit>>> for AppError {
+    fn from(error: PoisonError<std::sync::MutexGuard<'_, rate_limit::Ratelimit>>) -> Self {
+        AppError(format!("Rate limit mutex error: {}", error))
     }
 }
 impl From<std::convert::Infallible> for AppError {

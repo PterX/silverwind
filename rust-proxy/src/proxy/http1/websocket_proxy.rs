@@ -46,7 +46,7 @@ async fn server_upgraded_io(
 }
 pub async fn server_upgrade(
     req: Request<BoxBody<Bytes, AppError>>,
-    check_result: Option<HandlingResult>,
+    check_result: HandlingResult,
     http_client: HttpClients,
 ) -> Result<Response<BoxBody<Bytes, AppError>>, AppError> {
     debug!("The source request:{:?}.", req);
@@ -64,7 +64,7 @@ pub async fn server_upgrade(
         .to_str()?
         .to_string();
 
-    let request_path = check_result.ok_or("check_result is none")?.request_path;
+    let request_path = check_result.request_path;
     let mut new_request = Request::builder()
         .method(req.method().clone())
         .uri(request_path.clone())
