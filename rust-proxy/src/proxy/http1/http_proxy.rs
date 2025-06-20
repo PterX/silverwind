@@ -1,5 +1,6 @@
 use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
 use crate::monitor::prometheus_exporter::{get_timer_list, inc};
+use crate::proxy::http1::app_clients::AppClients;
 use crate::proxy::http1::http_client::HttpClients;
 use crate::proxy::proxy_trait::DestinationResult;
 use crate::vojo::app_error::AppError;
@@ -44,7 +45,7 @@ impl HttpProxy {
     pub async fn start_http_server(&mut self) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
-        let client = HttpClients::new();
+        let client = AppClients::new(self.shared_config.clone(), self.port).await?;
         let mapping_key_clone1 = self.mapping_key.clone();
         let reveiver = &mut self.channel;
 
@@ -94,7 +95,7 @@ impl HttpProxy {
     ) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
-        let client = HttpClients::new();
+        let client = AppClients::new(self.shared_config.clone(), self.port).await?;
         let mapping_key_clone1 = self.mapping_key.clone();
 
         let mut cer_reader = BufReader::new(pem_str.as_bytes());
@@ -157,7 +158,7 @@ impl HttpProxy {
 async fn proxy_adapter(
     port: i32,
     shared_config: SharedConfig,
-    client: HttpClients,
+    client: AppClients,
     req: Request<BoxBody<Bytes, AppError>>,
     mapping_key: String,
     remote_addr: SocketAddr,
@@ -182,7 +183,7 @@ async fn proxy_adapter(
 async fn proxy_adapter_with_error(
     port: i32,
     shared_config: SharedConfig,
-    client: HttpClients,
+    client: AppClients,
     req: Request<BoxBody<Bytes, AppError>>,
     mapping_key: String,
     remote_addr: SocketAddr,
@@ -241,7 +242,7 @@ async fn proxy_adapter_with_error(
 async fn proxy(
     port: i32,
     shared_config: SharedConfig,
-    client: HttpClients,
+    client: AppClients,
     mut req: Request<BoxBody<Bytes, AppError>>,
     mapping_key: String,
     remote_addr: SocketAddr,
@@ -304,51 +305,81 @@ async fn proxy(
             "The request has been updated to websocket,the req is {:?}!",
             req
         );
-        return server_upgrade(req, handling_result, client).await;
+        return server_upgrade(req, handling_result, client.http).await;
     }
 
     let check_request = handling_result;
     let request_path = check_request.request_path.as_str();
     let router_destination = check_request.router_destination;
-    let mut res = if router_destination.is_file() {
-        let mut parts = req.uri().clone().into_parts();
-        parts.path_and_query = Some(request_path.try_into()?);
-        *req.uri_mut() = Uri::from_parts(parts)?;
-        route_file(router_destination, req).await
-    } else {
-        *req.uri_mut() = request_path.parse()?;
-        let host = req
-            .uri()
-            .host()
-            .ok_or("Uri to host cause error")?
-            .to_string();
-        req.headers_mut()
-            .insert(http::header::HOST, HeaderValue::from_str(&host)?);
-        if let Some(mut middlewares) = spire_context.middlewares.clone() {
-            if !middlewares.is_empty() {
-                chain_trait
-                    .handle_before_request(&mut middlewares, remote_addr, &mut req)
-                    .await?;
-            }
+    let mut res = match router_destination {
+        RouterDestination::File(s) => {
+            let mut parts = req.uri().clone().into_parts();
+            parts.path_and_query = Some(request_path.try_into()?);
+            *req.uri_mut() = Uri::from_parts(parts)?;
+            route_file(router_destination, req).await
         }
-        let request_future = if request_path.contains("https") {
-            client.request_https(req, DEFAULT_HTTP_TIMEOUT)
-        } else {
-            client.request_http(req, DEFAULT_HTTP_TIMEOUT)
-        };
-        let response_result = match request_future.await {
-            Ok(response) => response.map_err(AppError::from),
-            _ => {
-                return Err(AppError(format!(
-                    "Request time out,the uri is {}",
-                    request_path
-                )))
+        RouterDestination::Http(s) => {
+            *req.uri_mut() = request_path.parse()?;
+            let host = req
+                .uri()
+                .host()
+                .ok_or("Uri to host cause error")?
+                .to_string();
+            req.headers_mut()
+                .insert(http::header::HOST, HeaderValue::from_str(&host)?);
+            if let Some(mut middlewares) = spire_context.middlewares.clone() {
+                if !middlewares.is_empty() {
+                    chain_trait
+                        .handle_before_request(&mut middlewares, remote_addr, &mut req)
+                        .await?;
+                }
             }
-        };
-        response_result.map(|item| {
-            item.map(|s| s.boxed())
-                .map(|item: BoxBody<Bytes, hyper::Error>| item.map_err(AppError::from).boxed())
-        })
+            let request_future = if request_path.contains("https") {
+                client.http.request_https(req, DEFAULT_HTTP_TIMEOUT)
+            } else {
+                client.http.request_http(req, DEFAULT_HTTP_TIMEOUT)
+            };
+            let response_result = match request_future.await {
+                Ok(response) => response.map_err(AppError::from),
+                _ => {
+                    return Err(AppError(format!(
+                        "Request time out,the uri is {}",
+                        request_path
+                    )))
+                }
+            };
+            response_result.map(|item| {
+                item.map(|s| s.boxed())
+                    .map(|item: BoxBody<Bytes, hyper::Error>| item.map_err(AppError::from).boxed())
+            })
+        }
+        RouterDestination::Grpc(s) => {
+            let mut grpc_client = client
+                .grpc
+                .ok_or(AppError::from(""))?
+                .get_client(&s.endpoint)
+                .await?;
+
+            let body_bytes = req.collect().await?.to_bytes();
+            let body_str = String::from_utf8(body_bytes.to_vec())
+                .map_err(|e| AppError(format!("Invalid UTF-8 in request body: {}", e)))?;
+
+            let grpc_request = tonic::Request::new(TranscodeRequest { data: body_str });
+
+            let grpc_response = grpc_client.transcode(grpc_request).await?;
+
+            let response_body = grpc_response.into_inner().result;
+            let response = Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(
+                    Full::new(Bytes::from(response_body))
+                        .map_err(AppError::from)
+                        .boxed(),
+                )?;
+
+            Ok(response)
+        }
     };
     if let Some(mut middlewares) = spire_context.middlewares {
         if !middlewares.is_empty() {
@@ -415,10 +446,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_proxy_adapter_error_handling() {
-        let client = HttpClients::new();
         let shared_config = SharedConfig {
             shared_data: Arc::new(Mutex::new(AppConfig::default())),
         };
+        let client = AppClients::new(shared_config.clone(), 3302).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let req = Request::builder()
@@ -457,7 +489,6 @@ mod tests {
             HeaderValue::from_static("POST"),
         );
 
-        let client = HttpClients::new();
         let shared_config = SharedConfig {
             shared_data: Arc::new(Mutex::new(AppConfig {
                 api_service_config: HashMap::from([(
@@ -484,6 +515,8 @@ mod tests {
                 ..Default::default()
             })),
         };
+        let client = AppClients::new(shared_config.clone(), 8080).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let mut req = Request::builder()
@@ -518,8 +551,9 @@ mod tests {
             HeaderValue::from_static("POST"),
         );
 
-        let client = HttpClients::new();
         let shared_config = SharedConfig::from_app_config(AppConfig::default());
+        let client = AppClients::new(shared_config.clone(), 8080).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let mut req = Request::builder()
@@ -560,8 +594,9 @@ mod tests {
             HeaderValue::from_static("POST"),
         );
 
-        let client = HttpClients::new();
         let shared_config = SharedConfig::from_app_config(AppConfig::default());
+        let client = AppClients::new(shared_config.clone(), 8080).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let mut req = Request::builder()
@@ -618,8 +653,9 @@ mod tests {
             HeaderValue::from_static("POST"),
         );
 
-        let client = HttpClients::new();
         let shared_config = SharedConfig::from_app_config(AppConfig::default());
+        let client = AppClients::new(shared_config.clone(), 8080).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let mut req = Request::builder()

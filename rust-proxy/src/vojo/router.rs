@@ -101,32 +101,29 @@ impl Router {
     ) -> Result<RouterDestination, AppError> {
         match self {
             Router::StaticFile(s) => Ok(RouterDestination::File(s.clone())),
-            Router::Poll(poll_route) => Ok(RouterDestination::Http(poll_route.get_route(headers)?)),
-
+            Router::Poll(poll_route) => Ok(poll_route.get_route(headers)?.to_destination()?),
             Router::HeaderBased(poll_route) => {
-                Ok(RouterDestination::Http(poll_route.get_route(headers)?))
+                Ok(poll_route.get_route(headers)?.to_destination()?)
             }
 
-            Router::Random(poll_route) => {
-                Ok(RouterDestination::Http(poll_route.get_route(headers)?))
-            }
+            Router::Random(poll_route) => Ok(poll_route.get_route(headers)?.to_destination()?),
 
             Router::WeightBased(poll_route) => {
-                Ok(RouterDestination::Http(poll_route.get_route(headers)?))
+                Ok(poll_route.get_route(headers)?.to_destination()?)
             }
         }
     }
-    pub async fn get_all_route(&mut self) -> Result<Vec<BaseRoute>, AppError> {
+    pub fn get_all_route(&self) -> Result<Vec<BaseRoute>, AppError> {
         match self {
             Router::StaticFile(_) => {
                 Err(AppError("StaticFile router can not get route".to_string()))
             }
-            Router::Poll(poll_route) => poll_route.get_all_route().await,
-            Router::HeaderBased(poll_route) => poll_route.get_all_route().await,
+            Router::Poll(poll_route) => poll_route.get_all_route(),
+            Router::HeaderBased(header_based) => header_based.get_all_route(),
 
-            Router::Random(poll_route) => poll_route.get_all_route().await,
+            Router::Random(random) => random.get_all_route(),
 
-            Router::WeightBased(poll_route) => poll_route.get_all_route().await,
+            Router::WeightBased(weighted_route) => weighted_route.get_all_route(),
         }
     }
     pub fn update_route_alive(
@@ -204,6 +201,15 @@ pub struct BaseRoute {
     pub is_alive: Option<bool>,
 }
 
+impl BaseRoute {
+    fn to_destination(&self) -> Result<RouterDestination, AppError> {
+        if self.endpoint.starts_with("grpc://") {
+            Ok(RouterDestination::Grpc(self.clone()))
+        } else {
+            Ok(RouterDestination::Http(self.clone()))
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SplitSegment {
     #[serde(rename = "by")]
@@ -384,7 +390,7 @@ pub struct HeaderBasedRoute {
 }
 
 impl HeaderBasedRoute {
-    async fn get_all_route(&mut self) -> Result<Vec<BaseRoute>, AppError> {
+    fn get_all_route(&self) -> Result<Vec<BaseRoute>, AppError> {
         Ok(self
             .routes
             .iter()
@@ -491,7 +497,7 @@ impl RandomRoute {
                 .collect::<Vec<BaseRoute>>(),
         }
     }
-    async fn get_all_route(&mut self) -> Result<Vec<BaseRoute>, AppError> {
+    fn get_all_route(&self) -> Result<Vec<BaseRoute>, AppError> {
         Ok(self.routes.to_vec())
     }
 
@@ -545,7 +551,7 @@ pub struct PollRoute {
 }
 
 impl PollRoute {
-    async fn get_all_route(&mut self) -> Result<Vec<BaseRoute>, AppError> {
+    fn get_all_route(&self) -> Result<Vec<BaseRoute>, AppError> {
         Ok(self.routes.clone())
     }
 
@@ -623,10 +629,10 @@ impl WeightedRouteItem {
     }
 }
 impl WeightBasedRoute {
-    async fn get_all_route(&mut self) -> Result<Vec<BaseRoute>, AppError> {
+    fn get_all_route(&self) -> Result<Vec<BaseRoute>, AppError> {
         Ok(self
             .routes
-            .iter_mut()
+            .iter()
             .map(|item| item.get_base_route().clone())
             .collect::<Vec<BaseRoute>>())
     }
@@ -1122,7 +1128,7 @@ mod tests {
     #[tokio::test]
     async fn test_router_get_all_route() {
         let mut header_based_router = Router::HeaderBased(HeaderBasedRoute { routes: vec![] });
-        let _ = header_based_router.get_all_route().await;
+        let _ = header_based_router.get_all_route();
         let _ = header_based_router.update_route_alive(
             BaseRoute {
                 endpoint: "test".to_string(),
@@ -1131,7 +1137,7 @@ mod tests {
             false,
         );
         let mut weight_based_router = Router::WeightBased(WeightBasedRoute { routes: vec![] });
-        let _ = weight_based_router.get_all_route().await;
+        let _ = weight_based_router.get_all_route();
         let _ = weight_based_router.update_route_alive(
             BaseRoute {
                 endpoint: "test".to_string(),
@@ -1158,7 +1164,7 @@ mod tests {
             },
             false,
         );
-        let all_routes = router.get_all_route().await.unwrap();
+        let all_routes = router.get_all_route().unwrap();
         assert_eq!(all_routes.len(), 2);
         assert_eq!(all_routes[0].endpoint, "s1");
 
@@ -1172,7 +1178,7 @@ mod tests {
             },
             false,
         );
-        let result = static_router.get_all_route().await;
+        let result = static_router.get_all_route();
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),

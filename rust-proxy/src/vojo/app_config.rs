@@ -10,6 +10,7 @@ use crate::vojo::router::Router;
 use crate::DEFAULT_ADMIN_PORT;
 use http::HeaderMap;
 use http::HeaderValue;
+use prost_reflect::DescriptorPool;
 use regex::Regex;
 use serde::Deserializer;
 use serde::Serializer;
@@ -80,7 +81,6 @@ fn is_empty(value: &str) -> bool {
     value.is_empty()
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Transcode {
     pub proto_descriptor_set: String,
     pub services: Vec<String>,

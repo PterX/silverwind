@@ -7,6 +7,7 @@ use http::header::InvalidHeaderValue;
 use http::header::ToStrError;
 use http::uri::InvalidUriParts;
 use http::StatusCode;
+use prost_reflect::DescriptorError;
 use rustls_pki_types::InvalidDnsNameError;
 use std::sync::PoisonError;
 use std::time::SystemTimeError;
@@ -46,6 +47,11 @@ macro_rules! impl_poison_error_for_app_error {
 }
 impl_poison_error_for_app_error!(rate_limit::Ratelimit, "Rate limit");
 impl_poison_error_for_app_error!(circuit_breaker::CircuitBreaker, "Circuit breaker");
+impl From<DescriptorError> for AppError {
+    fn from(error: DescriptorError) -> Self {
+        AppError(format!("Descriptor error: {}", error))
+    }
+}
 impl From<tonic::transport::Error> for AppError {
     fn from(error: tonic::transport::Error) -> Self {
         AppError(format!("Tonic transport error: {}", error))

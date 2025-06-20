@@ -84,7 +84,7 @@ impl TaskKey {
 }
 async fn get_endpoint_list(mut route: RouteConfig) -> Vec<String> {
     let mut result = vec![];
-    let base_route_list = route.router.get_all_route().await.unwrap_or(vec![]);
+    let base_route_list = route.router.get_all_route().unwrap_or(vec![]);
     for item in base_route_list {
         result.push(item.endpoint);
     }
@@ -193,7 +193,7 @@ async fn do_http_health_check<HC: HttpClientTrait + Send + Sync + 'static>(
     shared_config: SharedConfig,
 ) -> Result<(), AppError> {
     info!("Do http health check,the route is {:?}!", route);
-    let route_list = route.router.get_all_route().await?;
+    let route_list = route.router.get_all_route()?;
     let mut set = JoinSet::new();
     for item in route_list {
         let http_client_shared = http_health_check_client.clone();

@@ -80,6 +80,7 @@ impl DestinationResult {
 pub enum RouterDestination {
     Http(BaseRoute),
     File(StaticFileRoute),
+    Grpc(BaseRoute),
 }
 
 impl ChainTrait for CommonCheckRequest {
@@ -167,6 +168,14 @@ impl ChainTrait for CommonCheckRequest {
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path,
                         router_destination: RouterDestination::Http(base_route.clone()),
+                    }));
+                }
+                RouterDestination::Grpc(base_route) => {
+                    let request_path = [base_route.endpoint.as_str(), rest_path.as_str()].join("/");
+                    spire_context.middlewares = item.middlewares.clone();
+                    return Ok(DestinationResult::Matched(HandlingResult {
+                        request_path,
+                        router_destination: RouterDestination::Grpc(base_route.clone()),
                     }));
                 }
             }
@@ -261,6 +270,8 @@ impl RouterDestination {
         match self {
             RouterDestination::Http(base_route) => base_route.endpoint.clone(),
             RouterDestination::File(static_file_route) => static_file_route.doc_root.clone(),
+
+            RouterDestination::Grpc(base_route) => base_route.endpoint.clone(),
         }
     }
 
@@ -268,6 +279,7 @@ impl RouterDestination {
         match self {
             RouterDestination::Http(_) => false,
             RouterDestination::File(_) => true,
+            RouterDestination::Grpc(_) => false,
         }
     }
 }
@@ -322,9 +334,6 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
-        // assert!(result.is_some());
-        // let check_result = result.unwrap();
-        // assert_eq!(check_result.request_path, "http://backend.test.com/users");
     }
 
     #[tokio::test]

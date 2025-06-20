@@ -17,7 +17,6 @@ use crate::vojo::app_error::AppError;
 pub struct HttpClients {
     pub http_client: Client<HttpConnector, BoxBody<Bytes, AppError>>,
     pub https_client: Client<hyper_rustls::HttpsConnector<HttpConnector>, BoxBody<Bytes, AppError>>,
-    pub grpc_client: tonic::client::Grpc<Channel>,
 }
 impl HttpClients {
     pub fn new() -> HttpClients {
