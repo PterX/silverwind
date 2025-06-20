@@ -10,7 +10,67 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
 use crate::vojo::app_error::AppError;
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub enum JwtAlgorithm {
+    #[default]
+    HS256,
+    HS384,
+    HS512,
+}
+impl From<JwtAlgorithm> for Algorithm {
+    fn from(val: JwtAlgorithm) -> Self {
+        match val {
+            JwtAlgorithm::HS256 => Algorithm::HS256,
+            JwtAlgorithm::HS384 => Algorithm::HS384,
+            JwtAlgorithm::HS512 => Algorithm::HS512,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct JwtAuth {
+    pub secret: String,
+    pub algorithm: JwtAlgorithm,
+    pub issuer: Option<String>,
+    pub audience: Option<String>,
+}
+
+impl JwtAuth {
+    fn check_authentication(&mut self, headers: &HeaderMap<HeaderValue>) -> Result<bool, AppError> {
+        if let Some(auth_header) = headers.get("Authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                    let mut validation = Validation::new(self.algorithm.clone().into());
+                    if let Some(iss) = &self.issuer {
+                        validation.set_issuer(&[iss]);
+                    }
+                    if let Some(aud) = &self.audience {
+                        validation.set_audience(&[aud]);
+                    }
+
+                    let key = DecodingKey::from_secret(self.secret.as_bytes());
+
+                    match decode::<serde_json::Value>(token, &key, &validation) {
+                        Ok(_) => return Ok(true),
+                        Err(e) => {
+                            error!("JWT validation failed: {}", e);
+                            return Ok(false);
+                        }
+                    }
+                } else {
+                    error!("[JWT AUTH]-Invalid Authorization header format,missing Bearer.");
+                }
+            }
+        } else {
+            error!(
+                "[JWT AUTH]-Invalid Authorization header format,cannot find Authorization header."
+            );
+        }
+        Ok(false)
+    }
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "scheme", rename_all = "PascalCase")]
 pub enum Authentication {
@@ -18,6 +78,8 @@ pub enum Authentication {
     Basic(BasicAuth),
     #[serde(rename = "api_key")]
     ApiKey(ApiKeyAuth),
+    #[serde(rename = "jwt")]
+    Jwt(JwtAuth),
 }
 impl Middleware for Authentication {
     fn check_request(
@@ -46,6 +108,7 @@ impl Authentication {
         match self {
             Authentication::Basic(auth) => auth.check_authentication(headers),
             Authentication::ApiKey(auth) => auth.check_authentication(headers),
+            Authentication::Jwt(auth) => auth.check_authentication(headers),
         }
     }
 }
