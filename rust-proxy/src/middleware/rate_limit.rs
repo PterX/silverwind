@@ -128,7 +128,7 @@ fn default_time() -> SystemTime {
 }
 fn get_window_size_ms(time_unit: TimeUnit) -> u64 {
     match time_unit {
-        TimeUnit::MillionSecond => 1, // 假设最小单位是毫秒
+        TimeUnit::MillionSecond => 1, 
         TimeUnit::Second => 1000,
         TimeUnit::Minute => 60_000,
         TimeUnit::Hour => 3_600_000,
@@ -139,13 +139,12 @@ fn get_window_size_ms(time_unit: TimeUnit) -> u64 {
 fn get_window_start_ms(time_unit: TimeUnit) -> Result<u64, AppError> {
     let current_time = SystemTime::now();
     let since_the_epoch = current_time.duration_since(UNIX_EPOCH)?;
-    let now_ms = since_the_epoch.as_millis() as u64; // 使用 as_millis() 更简洁
+    let now_ms = since_the_epoch.as_millis() as u64; 
     let window_size = get_window_size_ms(time_unit);
     let window_start = (now_ms / window_size) * window_size;
     Ok(window_start)
 }
 fn get_time_key(time_unit: TimeUnit) -> Result<String, AppError> {
-    // 复用我们的核心逻辑
     let window_start_key_num = match time_unit {
         TimeUnit::MillionSecond => get_window_start_ms(time_unit)?,
         _ => get_window_start_ms(time_unit.clone())? / get_window_size_ms(time_unit),

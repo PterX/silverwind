@@ -182,13 +182,13 @@ impl ChainTrait for CommonCheckRequest {
         let methods_header = cors_config
             .allowed_methods
             .iter()
-            .map(|m| m.as_str()) // Convert serde_json::Error to AppError
+            .map(|m| m.as_str()) 
             .collect::<Vec<&str>>()
             .join(", ");
         let headers_header = cors_config
             .allowed_headers
             .iter()
-            .map(|m| m.to_string()) // Convert serde_json::Error to AppError
+            .map(|m| m.to_string())
             .collect::<Vec<String>>()
             .join(", ");
 
