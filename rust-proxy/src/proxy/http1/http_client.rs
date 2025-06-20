@@ -9,6 +9,7 @@ use rustls::RootCertStore;
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio::time::Timeout;
+use tonic::transport::Channel;
 
 use crate::vojo::app_error::AppError;
 
@@ -16,6 +17,7 @@ use crate::vojo::app_error::AppError;
 pub struct HttpClients {
     pub http_client: Client<HttpConnector, BoxBody<Bytes, AppError>>,
     pub https_client: Client<hyper_rustls::HttpsConnector<HttpConnector>, BoxBody<Bytes, AppError>>,
+    pub grpc_client: tonic::client::Grpc<Channel>,
 }
 impl HttpClients {
     pub fn new() -> HttpClients {
@@ -38,6 +40,13 @@ impl HttpClients {
             http_client,
             https_client,
         }
+    }
+    pub async fn new1() -> Result<(), AppError> {
+        let channel = Channel::from_static("BACKEND_GRPC_TARGET")
+            .connect()
+            .await?;
+        let s = tonic::client::Grpc::new(channel);
+        Ok(())
     }
     pub fn request_http(
         &self,

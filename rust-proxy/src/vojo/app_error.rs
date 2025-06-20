@@ -46,6 +46,11 @@ macro_rules! impl_poison_error_for_app_error {
 }
 impl_poison_error_for_app_error!(rate_limit::Ratelimit, "Rate limit");
 impl_poison_error_for_app_error!(circuit_breaker::CircuitBreaker, "Circuit breaker");
+impl From<tonic::transport::Error> for AppError {
+    fn from(error: tonic::transport::Error) -> Self {
+        AppError(format!("Tonic transport error: {}", error))
+    }
+}
 impl From<std::convert::Infallible> for AppError {
     fn from(_: std::convert::Infallible) -> Self {
         AppError("Infallible error".to_string())

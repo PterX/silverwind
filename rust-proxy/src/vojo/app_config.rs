@@ -79,6 +79,13 @@ pub struct LivenessStatus {
 fn is_empty(value: &str) -> bool {
     value.is_empty()
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Transcode {
+    pub proto_descriptor_set: String,
+    pub services: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RouteConfig {
     #[serde(skip_serializing_if = "is_empty", default = "default_route_id")]
@@ -87,7 +94,8 @@ pub struct RouteConfig {
     pub host_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matcher: Option<Matcher>,
-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcode: Option<Transcode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anomaly_detection: Option<AnomalyDetectionType>,
     #[serde(skip_deserializing, skip_serializing)]
