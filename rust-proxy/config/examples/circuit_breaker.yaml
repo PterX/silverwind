@@ -1,0 +1,16 @@
+log_level: debug
+servers:
+  - listen: 8084
+    protocol: http
+    routes:
+      - matcher:
+          prefix: /
+          prefix_rewrite: /
+        forward_to: http://httpbins.org/
+        middlewares:
+          - kind: circuit_breaker
+            failure_threshold: 0.5
+            consecutive_failures: 5
+            cooldown: "30s"
+            half_open_requests: 3
+            request_volume_threshold: 20

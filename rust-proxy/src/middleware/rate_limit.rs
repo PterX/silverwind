@@ -2,17 +2,23 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::constants::common_constants::DEFAULT_FIXEDWINDOW_MAP_SIZE;
+use crate::middleware::middlewares::CheckResult;
+use crate::middleware::middlewares::Denial;
+use crate::middleware::middlewares::Middleware;
 use crate::vojo::app_error::AppError;
 use core::fmt::Debug;
 use http::header;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::StatusCode;
 use ipnet::Ipv4Net;
 use iprange::IpRange;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 const X_RATELIMIT_LIMIT: HeaderName = HeaderName::from_static("x-ratelimit-limit");
 const X_RATELIMIT_REMAINING: HeaderName = HeaderName::from_static("x-ratelimit-remaining");
@@ -24,6 +30,27 @@ pub enum Ratelimit {
     TokenBucket(TokenBucketRateLimit),
     #[serde(rename = "fixed_window")]
     FixedWindow(FixedWindowRateLimit),
+}
+impl Middleware for Arc<Mutex<Ratelimit>> {
+    fn check_request(
+        &mut self,
+        peer_addr: &SocketAddr,
+        headers_option: Option<&HeaderMap<HeaderValue>>,
+    ) -> Result<CheckResult, AppError> {
+        if let Some(header_map) = headers_option {
+            let mut lock = self.lock()?;
+            let limit_res = lock.should_limit(header_map, peer_addr)?;
+            if let Some(rate_limit_headers) = limit_res {
+                let denial = Denial {
+                    status: StatusCode::TOO_MANY_REQUESTS,
+                    headers: rate_limit_headers,
+                    body: "API rate limit exceeded".to_string(),
+                };
+                return Ok(CheckResult::Denied(denial));
+            }
+        }
+        Ok(CheckResult::Allowed)
+    }
 }
 impl Ratelimit {
     pub fn should_limit(
@@ -128,7 +155,7 @@ fn default_time() -> SystemTime {
 }
 fn get_window_size_ms(time_unit: TimeUnit) -> u64 {
     match time_unit {
-        TimeUnit::MillionSecond => 1, // 假设最小单位是毫秒
+        TimeUnit::MillionSecond => 1,
         TimeUnit::Second => 1000,
         TimeUnit::Minute => 60_000,
         TimeUnit::Hour => 3_600_000,
@@ -139,13 +166,12 @@ fn get_window_size_ms(time_unit: TimeUnit) -> u64 {
 fn get_window_start_ms(time_unit: TimeUnit) -> Result<u64, AppError> {
     let current_time = SystemTime::now();
     let since_the_epoch = current_time.duration_since(UNIX_EPOCH)?;
-    let now_ms = since_the_epoch.as_millis() as u64; // 使用 as_millis() 更简洁
+    let now_ms = since_the_epoch.as_millis() as u64;
     let window_size = get_window_size_ms(time_unit);
     let window_start = (now_ms / window_size) * window_size;
     Ok(window_start)
 }
 fn get_time_key(time_unit: TimeUnit) -> Result<String, AppError> {
-    // 复用我们的核心逻辑
     let window_start_key_num = match time_unit {
         TimeUnit::MillionSecond => get_window_start_ms(time_unit)?,
         _ => get_window_start_ms(time_unit.clone())? / get_window_size_ms(time_unit),

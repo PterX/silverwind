@@ -1,3 +1,9 @@
+use crate::middleware::middlewares::CheckResult;
+use crate::middleware::middlewares::Denial;
+use crate::middleware::middlewares::Middleware;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::StatusCode;
 use ipnet::Ipv4Net;
 use iprange::IpRange;
 use serde::{Deserialize, Serialize};
@@ -8,6 +14,23 @@ use crate::vojo::app_error::AppError;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct AllowDenyIp {
     pub rules: Vec<AllowDenyItem>,
+}
+impl Middleware for AllowDenyIp {
+    fn check_request(
+        &mut self,
+        peer_addr: &SocketAddr,
+        _headers_option: Option<&HeaderMap<HeaderValue>>,
+    ) -> Result<CheckResult, AppError> {
+        if !self.ip_is_allowed(peer_addr)? {
+            let denial = Denial {
+                status: StatusCode::FORBIDDEN,
+                headers: HeaderMap::new(),
+                body: "Access from your IP address is forbidden".to_string(),
+            };
+            return Ok(CheckResult::Denied(denial));
+        }
+        Ok(CheckResult::Allowed)
+    }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct AllowDenyItem {

@@ -1,4 +1,3 @@
-use crate::constants::common_constants;
 use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
 use crate::monitor::prometheus_exporter::{get_timer_list, inc};
 use crate::proxy::http1::http_client::HttpClients;
@@ -311,18 +310,11 @@ async fn proxy(
     let check_request = handling_result;
     let request_path = check_request.request_path.as_str();
     let router_destination = check_request.router_destination;
-    if let Some(middlewares) = spire_context.middlewares.clone() {
-        if !middlewares.is_empty() {
-            chain_trait
-                .handle_before_request(middlewares, remote_addr, &mut req)
-                .await?;
-        }
-    }
     let mut res = if router_destination.is_file() {
         let mut parts = req.uri().clone().into_parts();
         parts.path_and_query = Some(request_path.try_into()?);
         *req.uri_mut() = Uri::from_parts(parts)?;
-        route_file(router_destination, req).await?
+        route_file(router_destination, req).await
     } else {
         *req.uri_mut() = request_path.parse()?;
         let host = req
@@ -332,7 +324,13 @@ async fn proxy(
             .to_string();
         req.headers_mut()
             .insert(http::header::HOST, HeaderValue::from_str(&host)?);
-
+        if let Some(mut middlewares) = spire_context.middlewares.clone() {
+            if !middlewares.is_empty() {
+                chain_trait
+                    .handle_before_request(&mut middlewares, remote_addr, &mut req)
+                    .await?;
+            }
+        }
         let request_future = if request_path.contains("https") {
             client.request_https(req, DEFAULT_HTTP_TIMEOUT)
         } else {
@@ -347,27 +345,19 @@ async fn proxy(
                 )))
             }
         };
-        response_result?
-            .map(|b| b.boxed())
-            .map(|item: BoxBody<Bytes, hyper::Error>| item.map_err(AppError::from).boxed())
+        response_result.map(|item| {
+            item.map(|s| s.boxed())
+                .map(|item: BoxBody<Bytes, hyper::Error>| item.map_err(AppError::from).boxed())
+        })
     };
-    if let Some(middlewares) = spire_context.middlewares {
+    if let Some(mut middlewares) = spire_context.middlewares {
         if !middlewares.is_empty() {
             chain_trait
-                .handle_before_response(middlewares, request_path, &mut res)
+                .handle_before_response(&mut middlewares, request_path, &mut res)
                 .await?;
         }
     }
-    return Ok(res);
-
-    Ok(Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(
-            Full::new(Bytes::from(common_constants::NOT_FOUND))
-                .map_err(AppError::from)
-                .boxed(),
-        )
-        .unwrap())
+    res
 }
 
 async fn route_file(

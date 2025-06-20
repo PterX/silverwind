@@ -1,0 +1,17 @@
+log_level: debug
+servers:
+  - listen: 8084
+    protocol: http
+    routes:
+      - matcher:
+          prefix: /
+          prefix_rewrite: /
+        forward_to: http://127.0.0.1:8090/
+        middlewares:
+          - kind: request_headers
+            add:
+              X-Api-Version: "v2"
+              X-Request-Source: "my-gateway"
+              host: "lsk.com"
+            remove:
+              - "X-Internal-Debug"
