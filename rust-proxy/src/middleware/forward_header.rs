@@ -1,3 +1,4 @@
+use crate::middleware::middlewares::Middleware;
 use crate::AppError;
 use bytes::Bytes;
 use http::Request;
@@ -5,8 +6,18 @@ use http_body_util::combinators::BoxBody;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::SocketAddr;
+// 只负责添加 X-Real-IP 和 X-Forwarded-For。它不需要任何配置字段。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForwardHeader {}
+impl Middleware for ForwardHeader {
+    fn handle_request(
+        &mut self,
+        peer_addr: SocketAddr,
+        req: &mut Request<BoxBody<Bytes, AppError>>,
+    ) -> Result<(), AppError> {
+        self.handle_before_request(peer_addr, req)
+    }
+}
 impl ForwardHeader {
     pub fn handle_before_request(
         &self,

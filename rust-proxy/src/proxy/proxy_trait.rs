@@ -1,6 +1,7 @@
 use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::middlewares::Denial;
 use crate::middleware::middlewares::MiddleWares;
+use crate::middleware::middlewares::Middleware;
 use crate::vojo::app_error::AppError;
 use crate::vojo::router::BaseRoute;
 use crate::vojo::router::StaticFileRoute;
@@ -84,26 +85,31 @@ pub enum RouterDestination {
 impl ChainTrait for CommonCheckRequest {
     async fn handle_before_response(
         &self,
-        middlewares: Vec<MiddleWares>,
+        middlewares: &mut Vec<MiddleWares>,
         req_path: &str,
 
-        response: &mut Response<BoxBody<Bytes, AppError>>,
+        response: &mut Result<Response<BoxBody<Bytes, AppError>>, AppError>,
     ) -> Result<(), AppError> {
+        for item in middlewares.iter_mut() {
+            item.record_outcome(response);
+        }
         for item in middlewares.iter() {
-            item.handle_before_response(req_path, response)?;
+            if let Ok(ref mut r) = response {
+                item.handle_response(req_path, r)?;
+            }
         }
 
         Ok(())
     }
     async fn handle_before_request(
         &self,
-        middlewares: Vec<MiddleWares>,
+        middlewares: &mut Vec<MiddleWares>,
 
         peer_addr: SocketAddr,
         req: &mut Request<BoxBody<Bytes, AppError>>,
     ) -> Result<(), AppError> {
-        for item in middlewares.iter() {
-            item.handle_before_request(peer_addr, req)?;
+        for item in middlewares.iter_mut() {
+            item.handle_request(peer_addr, req)?;
         }
         Ok(())
     }
@@ -182,7 +188,7 @@ impl ChainTrait for CommonCheckRequest {
         let methods_header = cors_config
             .allowed_methods
             .iter()
-            .map(|m| m.as_str()) 
+            .map(|m| m.as_str())
             .collect::<Vec<&str>>()
             .join(", ");
         let headers_header = cors_config
@@ -233,9 +239,9 @@ pub trait ChainTrait {
     ) -> Result<DestinationResult, AppError>;
     async fn handle_before_response(
         &self,
-        middlewares: Vec<MiddleWares>,
+        middlewares: &mut Vec<MiddleWares>,
         req_path: &str,
-        response: &mut Response<BoxBody<Bytes, AppError>>,
+        response: &mut Result<Response<BoxBody<Bytes, AppError>>, AppError>,
     ) -> Result<(), AppError>;
     fn handle_preflight(
         &self,
@@ -244,7 +250,7 @@ pub trait ChainTrait {
     ) -> Result<Response<BoxBody<Bytes, AppError>>, AppError>;
     async fn handle_before_request(
         &self,
-        middlewares: Vec<MiddleWares>,
+        middlewares: &mut Vec<MiddleWares>,
         peer_addr: SocketAddr,
         req: &mut Request<BoxBody<Bytes, AppError>>,
     ) -> Result<(), AppError>;

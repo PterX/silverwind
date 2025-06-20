@@ -1,5 +1,6 @@
 use crate::middleware::middlewares::CheckResult;
 use crate::middleware::middlewares::MiddleWares;
+use crate::middleware::middlewares::Middleware;
 use crate::utils::uuid::get_uuid;
 use crate::vojo::anomaly_detection::AnomalyDetectionType;
 use crate::vojo::app_error::AppError;
@@ -155,7 +156,7 @@ impl RouteConfig {
     ) -> Result<CheckResult, AppError> {
         if let Some(middlewares) = &mut self.middlewares {
             for middleware in middlewares.iter_mut() {
-                let check_res = middleware.is_allowed(peer_addr, headers_option)?;
+                let check_res = middleware.check_request(peer_addr, headers_option)?;
                 if !check_res.is_allowed() {
                     return Ok(check_res);
                 }

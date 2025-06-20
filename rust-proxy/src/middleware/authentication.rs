@@ -1,9 +1,13 @@
+use crate::middleware::middlewares::CheckResult;
+use crate::middleware::middlewares::Denial;
+use crate::middleware::middlewares::Middleware;
 use base64::{engine::general_purpose, Engine as _};
 use core::fmt::Debug;
 use http::HeaderMap;
 use http::HeaderValue;
-
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 
 use crate::vojo::app_error::AppError;
 
@@ -15,7 +19,25 @@ pub enum Authentication {
     #[serde(rename = "api_key")]
     ApiKey(ApiKeyAuth),
 }
-
+impl Middleware for Authentication {
+    fn check_request(
+        &mut self,
+        _peer_addr: &SocketAddr,
+        headers_option: Option<&HeaderMap<HeaderValue>>,
+    ) -> Result<CheckResult, AppError> {
+        if let Some(header_map) = headers_option {
+            if !self.check_authentication(header_map)? {
+                let denial = Denial {
+                    status: StatusCode::UNAUTHORIZED,
+                    headers: HeaderMap::new(),
+                    body: "Authentication failed".to_string(),
+                };
+                return Ok(CheckResult::Denied(denial));
+            }
+        }
+        Ok(CheckResult::Allowed)
+    }
+}
 impl Authentication {
     pub fn check_authentication(
         &mut self,

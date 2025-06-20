@@ -1,3 +1,4 @@
+use crate::middleware::middlewares::Middleware;
 use crate::vojo::app_error::AppError;
 use bytes::Bytes;
 use http::header;
@@ -26,6 +27,16 @@ pub struct CorsConfig {
     pub max_age: Option<i32>,
     pub options_passthrough: Option<bool>,
 }
+impl Middleware for CorsConfig {
+    fn handle_response(
+        &self,
+        _req_path: &str,
+        response: &mut Response<BoxBody<Bytes, AppError>>,
+    ) -> Result<(), AppError> {
+        self.handle_before_response(response)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CorsAllowedOrigins {
     All,

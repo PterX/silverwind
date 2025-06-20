@@ -1,3 +1,4 @@
+use crate::middleware::circuit_breaker;
 use crate::middleware::rate_limit;
 use crate::vojo::app_config::AppConfig;
 use axum::response::IntoResponse;
@@ -34,11 +35,17 @@ impl From<&str> for AppError {
         AppError(s.to_string())
     }
 }
-impl From<std::sync::PoisonError<std::sync::MutexGuard<'_, rate_limit::Ratelimit>>> for AppError {
-    fn from(error: PoisonError<std::sync::MutexGuard<'_, rate_limit::Ratelimit>>) -> Self {
-        AppError(format!("Rate limit mutex error: {}", error))
-    }
+macro_rules! impl_poison_error_for_app_error {
+    ($inner_type:ty, $name:literal) => {
+        impl From<std::sync::PoisonError<std::sync::MutexGuard<'_, $inner_type>>> for AppError {
+            fn from(error: std::sync::PoisonError<std::sync::MutexGuard<'_, $inner_type>>) -> Self {
+                AppError(format!("{} mutex error: {}", $name, error))
+            }
+        }
+    };
 }
+impl_poison_error_for_app_error!(rate_limit::Ratelimit, "Rate limit");
+impl_poison_error_for_app_error!(circuit_breaker::CircuitBreaker, "Circuit breaker");
 impl From<std::convert::Infallible> for AppError {
     fn from(_: std::convert::Infallible) -> Self {
         AppError("Infallible error".to_string())

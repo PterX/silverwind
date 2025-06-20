@@ -5,6 +5,7 @@ use crate::middleware::authentication::Authentication;
 use crate::middleware::circuit_breaker::CircuitBreaker;
 use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::rate_limit::Ratelimit;
+use crate::middleware::request_headers::RequestHeaders;
 use crate::AppError;
 use bytes::Bytes;
 use http::HeaderMap;
@@ -55,8 +56,10 @@ pub enum MiddleWares {
     Headers(StaticResourceHeaders),
     #[serde(rename = "forward_headers")]
     ForwardHeader(ForwardHeader),
-
+    #[serde(rename = "circuit_breaker")]
     CircuitBreaker(#[serde(with = "arc_mutex_serde")] Arc<Mutex<CircuitBreaker>>),
+    #[serde(rename = "request_headers")]
+    RequestHeaders(RequestHeaders),
 }
 impl PartialEq for MiddleWares {
     fn eq(&self, other: &Self) -> bool {
@@ -76,8 +79,37 @@ impl PartialEq for MiddleWares {
                 let b_lock = b.lock().unwrap();
                 *a_lock == *b_lock
             }
+            (Self::RequestHeaders(a), Self::RequestHeaders(b)) => a == b,
             _ => false,
         }
+    }
+}
+pub trait Middleware: Send + Sync {
+    fn handle_request(
+        &mut self,
+        _peer_addr: SocketAddr,
+        _req: &mut Request<BoxBody<Bytes, AppError>>,
+    ) -> Result<(), AppError> {
+        Ok(())
+    }
+    fn check_request(
+        &mut self,
+        _peer_addr: &SocketAddr,
+        _headers: Option<&HeaderMap<HeaderValue>>,
+    ) -> Result<CheckResult, AppError> {
+        Ok(CheckResult::Allowed)
+    }
+    fn handle_response(
+        &self,
+        _req_path: &str,
+        _response: &mut Response<BoxBody<Bytes, AppError>>,
+    ) -> Result<(), AppError> {
+        Ok(())
+    }
+    fn record_outcome(
+        &mut self,
+        _response_result: &Result<Response<BoxBody<Bytes, AppError>>, AppError>,
+    ) {
     }
 }
 impl Eq for MiddleWares {}
@@ -107,82 +139,52 @@ impl CheckResult {
         }
     }
 }
-impl MiddleWares {
-    pub fn is_allowed(
+impl Middleware for MiddleWares {
+    fn handle_request(
+        &mut self,
+        peer_addr: SocketAddr,
+        req: &mut Request<BoxBody<Bytes, AppError>>,
+    ) -> Result<(), AppError> {
+        match self {
+            MiddleWares::ForwardHeader(mw) => mw.handle_request(peer_addr, req),
+            MiddleWares::RequestHeaders(mw) => mw.handle_request(peer_addr, req),
+            _ => Ok(()),
+        }
+    }
+
+    fn check_request(
         &mut self,
         peer_addr: &SocketAddr,
-        headers_option: Option<&HeaderMap<HeaderValue>>,
+        headers: Option<&HeaderMap<HeaderValue>>,
     ) -> Result<CheckResult, AppError> {
         match self {
-            MiddleWares::RateLimit(ratelimit) => {
-                if let Some(header_map) = headers_option {
-                    let mut lock = ratelimit.lock()?;
-                    let limit_res = lock.should_limit(header_map, peer_addr)?;
-                    if let Some(rate_limit_headers) = limit_res {
-                        let denial = Denial {
-                            status: StatusCode::TOO_MANY_REQUESTS,
-                            headers: rate_limit_headers,
-                            body: "API rate limit exceeded".to_string(),
-                        };
-                        return Ok(CheckResult::Denied(denial));
-                    }
-                }
-            }
-            MiddleWares::Authentication(authentication) => {
-                if let Some(header_map) = headers_option {
-                    let is_allowed = authentication.check_authentication(header_map)?;
-                    if !is_allowed {
-                        let denial = Denial {
-                            status: StatusCode::UNAUTHORIZED,
-                            headers: HeaderMap::new(),
-                            body: "Authentication failed".to_string(),
-                        };
-                        return Ok(CheckResult::Denied(denial));
-                    }
-                }
-            }
-            MiddleWares::AllowDenyList(allow_deny_list) => {
-                let is_allowed = allow_deny_list.ip_is_allowed(peer_addr)?;
-                if !is_allowed {
-                    let denial = Denial {
-                        status: StatusCode::FORBIDDEN,
-                        headers: HeaderMap::new(),
-                        body: "Access from your IP address is forbidden".to_string(),
-                    };
-                    return Ok(CheckResult::Denied(denial));
-                }
-            }
-            _ => {}
+            MiddleWares::RateLimit(mw) => mw.check_request(peer_addr, headers),
+            MiddleWares::Authentication(mw) => mw.check_request(peer_addr, headers),
+            MiddleWares::AllowDenyList(mw) => mw.check_request(peer_addr, headers),
+            MiddleWares::CircuitBreaker(mw) => mw.check_request(peer_addr, headers),
+            _ => Ok(CheckResult::Allowed),
         }
-        Ok(CheckResult::Allowed)
     }
-    pub fn handle_before_response(
+
+    fn handle_response(
         &self,
         req_path: &str,
-
         response: &mut Response<BoxBody<Bytes, AppError>>,
     ) -> Result<(), AppError> {
         match self {
-            MiddleWares::Cors(cors_config) => {
-                cors_config.handle_before_response(response)?;
-            }
-            MiddleWares::Headers(headers) => {
-                headers.handle_before_response(req_path, response)?;
-            }
-            _ => {}
+            MiddleWares::Cors(mw) => mw.handle_response(req_path, response),
+            MiddleWares::Headers(mw) => mw.handle_response(req_path, response),
+            _ => Ok(()),
         }
-        Ok(())
     }
-    pub fn handle_before_request(
-        &self,
-        peer_addr: SocketAddr,
 
-        req: &mut Request<BoxBody<Bytes, AppError>>,
-    ) -> Result<(), AppError> {
-        if let MiddleWares::ForwardHeader(forward_header) = self {
-            forward_header.handle_before_request(peer_addr, req)?;
+    fn record_outcome(
+        &mut self,
+        response_result: &Result<Response<BoxBody<Bytes, AppError>>, AppError>,
+    ) {
+        if let MiddleWares::CircuitBreaker(mw) = self {
+            mw.record_outcome(response_result)
         }
-        Ok(())
     }
 }
 #[cfg(test)]
@@ -206,10 +208,10 @@ mod tests {
             TokenBucketRateLimit::default(),
         ))));
 
-        let result = middleware.is_allowed(&socket, Some(&headers));
+        let result = middleware.check_request(&socket, Some(&headers));
         assert!(result.is_ok());
 
-        let result = middleware.is_allowed(&socket, Some(&headers));
+        let result = middleware.check_request(&socket, Some(&headers));
         assert!(result.is_ok());
     }
 
@@ -223,14 +225,14 @@ mod tests {
             credentials: "test-token".to_string(),
         }));
 
-        let result = middleware.is_allowed(&socket, Some(&headers));
+        let result = middleware.check_request(&socket, Some(&headers));
         assert!(result.is_ok());
 
         headers.insert(
             header::AUTHORIZATION,
             "Bearer invalid-token".parse().unwrap(),
         );
-        let result = middleware.is_allowed(&socket, Some(&headers));
+        let result = middleware.check_request(&socket, Some(&headers));
         assert!(result.is_ok());
     }
 
@@ -244,11 +246,11 @@ mod tests {
             }],
         });
 
-        let result = middleware.is_allowed(&socket, None);
+        let result = middleware.check_request(&socket, None);
         assert!(result.is_ok());
 
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
-        let result = middleware.is_allowed(&socket, None);
+        let result = middleware.check_request(&socket, None);
         assert!(result.is_ok());
     }
 
@@ -266,7 +268,7 @@ mod tests {
 
         let mut response = Response::builder().body(BoxBody::default()).unwrap();
 
-        let result = middleware.handle_before_response("", &mut response);
+        let result = middleware.handle_response("", &mut response);
         assert!(result.is_ok());
 
         assert_eq!(
@@ -281,11 +283,11 @@ mod tests {
     #[test]
     fn test_forward_header_middleware() {
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let middleware = MiddleWares::ForwardHeader(ForwardHeader {});
+        let mut middleware = MiddleWares::ForwardHeader(ForwardHeader {});
 
         let mut request = Request::builder().body(BoxBody::default()).unwrap();
 
-        let result = middleware.handle_before_request(socket, &mut request);
+        let result = middleware.handle_request(socket, &mut request);
         assert!(result.is_ok());
 
         assert_eq!(

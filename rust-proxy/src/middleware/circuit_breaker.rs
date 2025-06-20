@@ -1,4 +1,19 @@
+use crate::middleware::middlewares::CheckResult;
+use crate::middleware::middlewares::Denial;
+use crate::middleware::middlewares::Middleware;
+use crate::utils::duration_urils::human_duration;
+use crate::AppError;
+use bytes::Bytes;
+use http::header;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::Response;
+use http::StatusCode;
+use http_body_util::combinators::BoxBody;
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -28,16 +43,70 @@ impl Default for State {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CircuitBreaker {
+    #[serde(rename = "failure_threshold")]
     pub failure_rate_threshold: f64,
-    pub consecutive_failure_threshold: u32,
-    pub open_duration: Duration,
-    pub half_open_max_requests: u32,
-    pub min_requests_for_rate_calculation: u64,
 
+    #[serde(rename = "consecutive_failures")]
+    pub consecutive_failure_threshold: u32,
+
+    #[serde(rename = "cooldown", with = "human_duration")]
+    pub open_duration: Duration,
+
+    #[serde(rename = "half_open_requests")]
+    pub half_open_max_requests: u32,
+
+    #[serde(rename = "request_volume_threshold")]
+    pub min_requests_for_rate_calculation: u64,
     #[serde(skip)]
     state: State,
 }
+impl Middleware for Arc<Mutex<CircuitBreaker>> {
+    fn check_request(
+        &mut self,
+        _peer_addr: &SocketAddr,
+        _headers: Option<&HeaderMap<HeaderValue>>,
+    ) -> Result<CheckResult, AppError> {
+        let mut lock = self.lock()?;
+        let is_allowed = lock.is_call_allowed();
+        if !is_allowed {
+            debug!(
+                "[CircuitBreaker] Request denied,the info is {:?}",
+                lock.state_info()
+            );
+            let mut headers = HeaderMap::new();
 
+            headers.insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
+
+            let denial = Denial {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                headers,
+                body: "Service unavailable".to_string(),
+            };
+            Ok(CheckResult::Denied(denial))
+        } else {
+            Ok(CheckResult::Allowed)
+        }
+    }
+
+    fn record_outcome(
+        &mut self,
+        response_result: &Result<Response<BoxBody<Bytes, AppError>>, AppError>,
+    ) {
+        let mut lock = match self.lock() {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+
+        match response_result {
+            Ok(response) if response.status().is_success() => {
+                lock.record_success();
+            }
+            _ => {
+                lock.record_failure();
+            }
+        }
+    }
+}
 impl CircuitBreaker {
     pub fn is_call_allowed(&mut self) -> bool {
         match self.state {
@@ -102,7 +171,7 @@ impl CircuitBreaker {
                 if *total_requests >= self.min_requests_for_rate_calculation {
                     let current_failure_rate = *failures as f64 / *total_requests as f64;
                     if current_failure_rate >= self.failure_rate_threshold {
-                        println!("[CircuitBreaker] Closed -> Open (Failure Rate)");
+                        debug!("[CircuitBreaker] Closed -> Open (Failure Rate)");
                         self.trip();
                     }
                 }
@@ -112,7 +181,7 @@ impl CircuitBreaker {
                 ..
             } => {
                 *total_probes += 1;
-                println!("[CircuitBreaker] HalfOpen -> Open (Failed Probe)");
+                debug!("[CircuitBreaker] HalfOpen -> Open (Failed Probe)");
                 self.trip();
             }
             State::Open { .. } => {}

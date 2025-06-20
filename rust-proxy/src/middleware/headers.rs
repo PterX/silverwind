@@ -1,3 +1,4 @@
+use crate::middleware::middlewares::Middleware;
 use crate::AppError;
 use bytes::Bytes;
 use http::header;
@@ -14,6 +15,15 @@ use std::time::SystemTime;
 pub struct StaticResourceHeaders {
     expires: Duration,
     extensions: Vec<String>,
+}
+impl Middleware for StaticResourceHeaders {
+    fn handle_response(
+        &self,
+        req_path: &str,
+        response: &mut Response<BoxBody<Bytes, AppError>>,
+    ) -> Result<(), AppError> {
+        self.handle_before_response(req_path, response)
+    }
 }
 impl<'de> Deserialize<'de> for StaticResourceHeaders {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
