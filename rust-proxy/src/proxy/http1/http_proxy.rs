@@ -12,6 +12,8 @@ use hyper::header;
 use hyper::header::{CONNECTION, SEC_WEBSOCKET_KEY};
 use hyper::Method;
 use hyper::StatusCode;
+use prost_reflect::DynamicMessage;
+use prost_reflect::SerializeOptions;
 
 use crate::proxy::http1::websocket_proxy::server_upgrade;
 use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
@@ -312,7 +314,7 @@ async fn proxy(
     let request_path = check_request.request_path.as_str();
     let router_destination = check_request.router_destination;
     let mut res = match router_destination {
-        RouterDestination::File(s) => {
+        RouterDestination::File(ref s) => {
             let mut parts = req.uri().clone().into_parts();
             parts.path_and_query = Some(request_path.try_into()?);
             *req.uri_mut() = Uri::from_parts(parts)?;
@@ -361,20 +363,19 @@ async fn proxy(
                 .await?;
 
             let body_bytes = req.collect().await?.to_bytes();
-            let body_str = String::from_utf8(body_bytes.to_vec())
-                .map_err(|e| AppError(format!("Invalid UTF-8 in request body: {}", e)))?;
-
-            let grpc_request = tonic::Request::new(TranscodeRequest { data: body_str });
-
-            let grpc_response = grpc_client.transcode(grpc_request).await?;
-
-            let response_body = grpc_response.into_inner().result;
+            let method_name = String::from("a");
+            let service_name = String::from("b");
+            let grpc_response = grpc_client
+                .do_request(service_name, method_name, body_bytes)
+                .await?;
+            let dynamic_message = grpc_response.into_inner();
+            let response_json_string = serde_json::to_string(&dynamic_message)?;
             let response = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(
-                    Full::new(Bytes::from(response_body))
-                        .map_err(AppError::from)
+                    Full::new(Bytes::from(response_json_string))
+                        .map_err(|e| AppError(format!("Failed to create response body: {}", e))) // map_err 的类型是 Infallible，但为保持一致性仍可转换
                         .boxed(),
                 )?;
 

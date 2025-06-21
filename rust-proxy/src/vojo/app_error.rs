@@ -12,6 +12,7 @@ use rustls_pki_types::InvalidDnsNameError;
 use std::sync::PoisonError;
 use std::time::SystemTimeError;
 use thiserror::Error;
+use tonic::Status;
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[error("Error is: {0}")]
 pub struct AppError(pub String);
@@ -29,6 +30,11 @@ impl IntoResponse for AppError {
 macro_rules! app_error {
     ($($arg:tt)*) => {
         AppError(format!($($arg)*))
+    }
+}
+impl From<Status> for AppError {
+    fn from(status: Status) -> Self {
+        AppError(format!("Status error: {}", status))
     }
 }
 impl From<&str> for AppError {

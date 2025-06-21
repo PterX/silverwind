@@ -2,10 +2,15 @@ use crate::vojo::app_error::AppError;
 use bytes::Bytes;
 use prost_reflect::DescriptorPool;
 use prost_reflect::DynamicMessage;
+use prost_reflect::MessageDescriptor;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::client::Grpc;
+use tonic::codec::Codec;
+use tonic::codec::Decoder;
+use tonic::codec::Encoder;
 use tonic::transport::Channel;
+use tonic::Response;
 #[derive(Clone)]
 
 pub struct GrpcChanel {
@@ -13,12 +18,12 @@ pub struct GrpcChanel {
     pub descriptor_pool: DescriptorPool,
 }
 impl GrpcChanel {
-    pub fn do_request(
-        &self,
+    pub async fn do_request(
+        &mut self,
         service_name: String,
         method_name: String,
         body: Bytes,
-    ) -> Result<(), AppError> {
+    ) -> Result<Response<DynamicMessage>, AppError> {
         let service_descriptor = self
             .descriptor_pool
             .get_service_by_name(service_name.as_str())
@@ -38,18 +43,18 @@ impl GrpcChanel {
         // 2. 使用输入消息的描述符来解码请求体
         let request_descriptor = method_descriptor.input();
         let dynamic_request = DynamicMessage::decode(request_descriptor, body).unwrap();
-        let codec = prost_reflect::prost::codec::DynamicCodec::new(self.descriptor_pool.clone());
+        let response_descriptor = method_descriptor.output();
+        let codec = DynamicCodec {
+            response_descriptor,
+        };
         let req = tonic::Request::new(dynamic_request);
         let path = http::uri::PathAndQuery::try_from(format!(
             "/{}/{}",
             service_descriptor.full_name(),
             method_descriptor.name()
         ))?;
-        let grpc_response = self
-            .channel
-            .unary(req, path, tonic::codec::ProstCodec::new())
-            .await?;
-        Ok(())
+        let grpc_response = self.channel.unary(req, path, codec).await?;
+        Ok(grpc_response)
     }
 }
 #[derive(Clone, Default)]
@@ -77,7 +82,7 @@ impl GrpcClients {
                 endpoint_item,
                 GrpcChanel {
                     channel: Grpc::new(channel),
-                    descriotor_pool: descriptor_pool,
+                    descriptor_pool: descriptor_pool,
                 },
             );
         }
@@ -93,5 +98,67 @@ impl GrpcClients {
             .cloned()
             .ok_or(AppError::from("Can not find chanel."))?;
         Ok(client)
+    }
+}
+#[derive(Debug, Clone)]
+pub struct DynamicCodec {
+    /// 用于解码响应消息的描述符
+    response_descriptor: MessageDescriptor,
+}
+
+impl Codec for DynamicCodec {
+    type Encode = DynamicMessage;
+    type Decode = DynamicMessage;
+
+    // 编码器很简单，不需要状态
+    type Encoder = DynamicEncoder;
+    // 解码器需要知道消息的结构，所以我们把描述符传给它
+    type Decoder = DynamicDecoder;
+
+    fn encoder(&mut self) -> Self::Encoder {
+        DynamicEncoder::default()
+    }
+
+    fn decoder(&mut self) -> Self::Decoder {
+        DynamicDecoder {
+            descriptor: self.response_descriptor.clone(),
+        }
+    }
+}
+use prost_reflect::prost::Message;
+use tonic::codec::DecodeBuf;
+use tonic::codec::EncodeBuf;
+use tonic::Status;
+/// DynamicMessage 的编码器
+#[derive(Debug, Default, Clone)]
+pub struct DynamicEncoder;
+
+impl Encoder for DynamicEncoder {
+    type Item = DynamicMessage;
+    type Error = Status;
+
+    fn encode(&mut self, item: Self::Item, buf: &mut EncodeBuf<'_>) -> Result<(), Self::Error> {
+        // DynamicMessage 已经实现了 prost::Message trait，可以直接使用 encode
+        item.encode_raw(buf);
+        Ok(())
+    }
+}
+
+/// DynamicMessage 的解码器
+#[derive(Debug, Clone)]
+pub struct DynamicDecoder {
+    descriptor: MessageDescriptor,
+}
+
+impl Decoder for DynamicDecoder {
+    type Item = DynamicMessage;
+    type Error = Status;
+
+    fn decode(&mut self, buf: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
+        // 使用我们持有的描述符来解码
+        let item = DynamicMessage::decode(self.descriptor.clone(), buf)
+            .map(Some)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(item)
     }
 }
