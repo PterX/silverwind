@@ -82,7 +82,6 @@ fn is_empty(value: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transcode {
     pub proto_descriptor_set: String,
-    pub services: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

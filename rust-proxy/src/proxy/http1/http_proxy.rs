@@ -193,9 +193,8 @@ async fn proxy_adapter_with_error(
         .unwrap_or("/")
         .to_string();
 
-    let current_time = SystemTime::now(); // 保留用于计算日志中的总耗时
+    let current_time = SystemTime::now();
 
-    // 1. 开始计时
     let timer = metrics::HTTP_REQUEST_DURATION_SECONDS
         .with_label_values(&[mapping_key.as_str(), path.as_str(), method.as_str()])
         .start_timer();
@@ -225,11 +224,7 @@ async fn proxy_adapter_with_error(
             )
             .unwrap()
     });
-
-    // 2. 停止计时并记录耗时
     timer.observe_duration();
-
-    // 3. 增加请求计数器
     let status = res.status();
     metrics::HTTP_REQUESTS_TOTAL
         .with_label_values(&[
@@ -367,6 +362,7 @@ async fn proxy(
             })
         }
         RouterDestination::Grpc(s) => {
+            info!("The request is grpc!,{}", request_path);
             let grpc_client = client
                 .grpc
                 .ok_or(AppError::from(""))?
@@ -374,8 +370,12 @@ async fn proxy(
                 .await?;
 
             let body_bytes = req.collect().await?.to_bytes();
-            let service_name = String::from("hello.HelloService");
-            let method_name = String::from("SayHello");
+            let parts: Vec<&str> = request_path.split('/').filter(|s| !s.is_empty()).collect();
+            if parts.len() < 2 {
+                return Err(AppError(request_path.to_string()));
+            }
+            let service_name = parts[0].to_string();
+            let method_name = parts[1].to_string();
             let grpc_response = grpc_client
                 .do_request(service_name, method_name, body_bytes)
                 .await?;

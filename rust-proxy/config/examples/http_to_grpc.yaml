@@ -9,5 +9,3 @@ servers:
         forward_to: grpc://grpcb.in:9000
         transcode: 
           proto_descriptor_set: "./config/examples/hello.pb"
-          services:
-            - hello.HelloService
