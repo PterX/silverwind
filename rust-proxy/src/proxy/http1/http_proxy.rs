@@ -363,8 +363,8 @@ async fn proxy(
                 .await?;
 
             let body_bytes = req.collect().await?.to_bytes();
-            let method_name = String::from("a");
-            let service_name = String::from("b");
+            let service_name = String::from("hello.HelloService");
+            let method_name = String::from("SayHello");
             let grpc_response = grpc_client
                 .do_request(service_name, method_name, body_bytes)
                 .await?;

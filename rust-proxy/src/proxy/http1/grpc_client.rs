@@ -12,14 +12,13 @@ use tonic::codec::Encoder;
 use tonic::transport::Channel;
 use tonic::Response;
 #[derive(Clone)]
-
 pub struct GrpcChanel {
     pub channel: Grpc<Channel>,
     pub descriptor_pool: DescriptorPool,
 }
 impl GrpcChanel {
     pub async fn do_request(
-        &mut self,
+        &self,
         service_name: String,
         method_name: String,
         body: Bytes,
@@ -40,20 +39,25 @@ impl GrpcChanel {
                 ))
             })?;
 
-        // 2. 使用输入消息的描述符来解码请求体
         let request_descriptor = method_descriptor.input();
-        let dynamic_request = DynamicMessage::decode(request_descriptor, body).unwrap();
+        debug!("{:?}", request_descriptor);
+        let mut deserializer = serde_json::Deserializer::from_slice(&body);
+
+        let dynamic_request = DynamicMessage::deserialize(request_descriptor, &mut deserializer)?;
         let response_descriptor = method_descriptor.output();
         let codec = DynamicCodec {
             response_descriptor,
         };
         let req = tonic::Request::new(dynamic_request);
+        let mut channel = self.channel.clone(); // <--- 克隆 channel
+
         let path = http::uri::PathAndQuery::try_from(format!(
             "/{}/{}",
             service_descriptor.full_name(),
             method_descriptor.name()
         ))?;
-        let grpc_response = self.channel.unary(req, path, codec).await?;
+        channel.ready().await?;
+        let grpc_response = channel.unary(req, path, codec).await?;
         Ok(grpc_response)
     }
 }

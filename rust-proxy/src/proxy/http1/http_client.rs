@@ -40,13 +40,7 @@ impl HttpClients {
             https_client,
         }
     }
-    pub async fn new1() -> Result<(), AppError> {
-        let channel = Channel::from_static("BACKEND_GRPC_TARGET")
-            .connect()
-            .await?;
-        let s = tonic::client::Grpc::new(channel);
-        Ok(())
-    }
+
     pub fn request_http(
         &self,
         req: Request<BoxBody<Bytes, AppError>>,

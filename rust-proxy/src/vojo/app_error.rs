@@ -53,6 +53,11 @@ macro_rules! impl_poison_error_for_app_error {
 }
 impl_poison_error_for_app_error!(rate_limit::Ratelimit, "Rate limit");
 impl_poison_error_for_app_error!(circuit_breaker::CircuitBreaker, "Circuit breaker");
+impl From<prost_reflect::prost::DecodeError> for AppError {
+    fn from(error: prost_reflect::prost::DecodeError) -> Self {
+        AppError(format!("Protobuf decode error: {}", error))
+    }
+}
 impl From<DescriptorError> for AppError {
     fn from(error: DescriptorError) -> Self {
         AppError(format!("Descriptor error: {}", error))
