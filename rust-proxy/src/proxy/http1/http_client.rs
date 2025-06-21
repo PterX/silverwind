@@ -9,7 +9,6 @@ use rustls::RootCertStore;
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio::time::Timeout;
-use tonic::transport::Channel;
 
 use crate::vojo::app_error::AppError;
 

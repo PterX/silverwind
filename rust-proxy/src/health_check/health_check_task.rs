@@ -82,7 +82,7 @@ impl TaskKey {
         }
     }
 }
-async fn get_endpoint_list(mut route: RouteConfig) -> Vec<String> {
+async fn get_endpoint_list(route: RouteConfig) -> Vec<String> {
     let mut result = vec![];
     let base_route_list = route.router.get_all_route().unwrap_or(vec![]);
     for item in base_route_list {
@@ -187,7 +187,7 @@ impl HealthCheck {
 
 async fn do_http_health_check<HC: HttpClientTrait + Send + Sync + 'static>(
     http_health_check_param: HttpHealthCheckParam,
-    mut route: RouteConfig,
+    route: RouteConfig,
     timeout_number: i32,
     http_health_check_client: Arc<HC>,
     shared_config: SharedConfig,

@@ -10,7 +10,6 @@ use crate::vojo::router::Router;
 use crate::DEFAULT_ADMIN_PORT;
 use http::HeaderMap;
 use http::HeaderValue;
-use prost_reflect::DescriptorPool;
 use regex::Regex;
 use serde::Deserializer;
 use serde::Serializer;

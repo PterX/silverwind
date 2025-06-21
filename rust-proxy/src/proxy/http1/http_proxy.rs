@@ -1,7 +1,6 @@
 use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
-use crate::monitor::prometheus_exporter::{get_timer_list, inc};
+use crate::monitor::prometheus_exporter::metrics;
 use crate::proxy::http1::app_clients::AppClients;
-use crate::proxy::http1::http_client::HttpClients;
 use crate::proxy::proxy_trait::DestinationResult;
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::SharedConfig;
@@ -12,20 +11,16 @@ use hyper::header;
 use hyper::header::{CONNECTION, SEC_WEBSOCKET_KEY};
 use hyper::Method;
 use hyper::StatusCode;
-use prost_reflect::DynamicMessage;
-use prost_reflect::SerializeOptions;
 
 use crate::proxy::http1::websocket_proxy::server_upgrade;
 use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
 use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
-use http::uri::PathAndQuery;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
-use prometheus::HistogramTimer;
 use rustls_pki_types::CertificateDer;
 use serde_json::json;
 use std::io::BufReader;
@@ -194,13 +189,17 @@ async fn proxy_adapter_with_error(
     let uri = req.uri().clone();
     let path = uri
         .path_and_query()
-        .unwrap_or(&PathAndQuery::from_static("/hello?world"))
+        .map(|p| p.as_str())
+        .unwrap_or("/")
         .to_string();
-    let current_time = SystemTime::now();
-    let monitor_timer_list = get_timer_list(mapping_key.clone(), path.clone())
-        .iter()
-        .map(|item| item.start_timer())
-        .collect::<Vec<HistogramTimer>>();
+
+    let current_time = SystemTime::now(); // 保留用于计算日志中的总耗时
+
+    // 1. 开始计时
+    let timer = metrics::HTTP_REQUEST_DURATION_SECONDS
+        .with_label_values(&[mapping_key.as_str(), path.as_str(), method.as_str()])
+        .start_timer();
+
     let res = proxy(
         port,
         shared_config,
@@ -226,17 +225,29 @@ async fn proxy_adapter_with_error(
             )
             .unwrap()
     });
+
+    // 2. 停止计时并记录耗时
+    timer.observe_duration();
+
+    // 3. 增加请求计数器
+    let status = res.status();
+    metrics::HTTP_REQUESTS_TOTAL
+        .with_label_values(&[
+            mapping_key.as_str(),
+            &path,
+            method.as_str(),
+            status.as_str(),
+        ])
+        .inc();
+
     let elapsed_time_res = current_time.elapsed()?;
-
-    let status = res.status().as_u16();
-    monitor_timer_list
-        .into_iter()
-        .for_each(|item| item.observe_duration());
-    inc(mapping_key.clone(), path.clone(), status);
-
     info!(
         "{} - -  \"{} {} HTTP/1.1\" {}  \"-\" \"-\"  {:?}",
-        remote_addr, method, path, status, elapsed_time_res
+        remote_addr,
+        method,
+        path,
+        status.as_u16(),
+        elapsed_time_res
     );
     Ok(res)
 }
@@ -314,13 +325,13 @@ async fn proxy(
     let request_path = check_request.request_path.as_str();
     let router_destination = check_request.router_destination;
     let mut res = match router_destination {
-        RouterDestination::File(ref s) => {
+        RouterDestination::File(ref _s) => {
             let mut parts = req.uri().clone().into_parts();
             parts.path_and_query = Some(request_path.try_into()?);
             *req.uri_mut() = Uri::from_parts(parts)?;
             route_file(router_destination, req).await
         }
-        RouterDestination::Http(s) => {
+        RouterDestination::Http(_s) => {
             *req.uri_mut() = request_path.parse()?;
             let host = req
                 .uri()
@@ -356,7 +367,7 @@ async fn proxy(
             })
         }
         RouterDestination::Grpc(s) => {
-            let mut grpc_client = client
+            let grpc_client = client
                 .grpc
                 .ok_or(AppError::from(""))?
                 .get_client(&s.endpoint)

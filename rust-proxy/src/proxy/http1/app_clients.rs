@@ -1,7 +1,6 @@
 use crate::proxy::http1::grpc_client::GrpcClients;
 use crate::proxy::http1::http_client::HttpClients;
 use crate::vojo::cli::SharedConfig;
-use crate::vojo::router::BaseRoute;
 use crate::AppError;
 #[derive(Clone)]
 pub struct AppClients {

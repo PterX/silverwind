@@ -67,13 +67,6 @@ impl DestinationResult {
             _ => None,
         }
     }
-
-    pub fn as_denial(&self) -> Option<&Denial> {
-        match self {
-            Self::NotAllowed(ref denial) => Some(denial),
-            _ => None,
-        }
-    }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 
@@ -272,14 +265,6 @@ impl RouterDestination {
             RouterDestination::File(static_file_route) => static_file_route.doc_root.clone(),
 
             RouterDestination::Grpc(base_route) => base_route.endpoint.clone(),
-        }
-    }
-
-    pub fn is_file(&self) -> bool {
-        match self {
-            RouterDestination::Http(_) => false,
-            RouterDestination::File(_) => true,
-            RouterDestination::Grpc(_) => false,
         }
     }
 }
