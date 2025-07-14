@@ -165,7 +165,7 @@ async fn local_account() -> Result<Account, AppError> {
                 terms_of_service_agreed: true,
                 only_return_existing: false,
             },
-            LetsEncrypt::Staging.url().to_owned(),
+            LetsEncrypt::Production.url().to_owned(),
             None,
         )
         .await?;
