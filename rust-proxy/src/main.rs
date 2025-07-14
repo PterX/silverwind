@@ -34,7 +34,9 @@ use tracing_subscriber::reload::Handle;
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let reload_handle = setup_logger()?;
-
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
     if let Err(e) = run_app(reload_handle).await {
         error!("Application failed to start:   {e:?}");
         return Err(e);
@@ -80,6 +82,7 @@ fn reconfigure_logger(
     let mut targets = vec![
         ("delay_timer", LevelFilter::OFF),
         ("hyper_util", LevelFilter::OFF),
+        ("h2", LevelFilter::OFF),
     ];
 
     if !static_config.health_check_log_enabled.unwrap_or(false) {
@@ -123,9 +126,7 @@ mod tests {
         let paths = match std::fs::read_dir("config/examples") {
             Ok(paths) => paths,
             Err(e) => {
-                println!(
-                    "Skipping test: config/examples directory not found. Error: {e}"
-                );
+                println!("Skipping test: config/examples directory not found. Error: {e}");
                 return Ok(());
             }
         };
@@ -139,8 +140,7 @@ mod tests {
                 let config_str = tokio::fs::read_to_string(&path).await?;
 
                 serde_yaml::from_str::<AppConfig>(&config_str).map_err(|e| {
-                    let error_msg =
-                        format!("Failed to parse config file '{file_path_str}': {e}");
+                    let error_msg = format!("Failed to parse config file '{file_path_str}': {e}");
                     eprintln!("{error_msg}");
                     AppError(error_msg)
                 })?;

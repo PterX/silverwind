@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
 
+use crate::vojo::app_error::AppError;
 use hyper::Request;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::ResponseFuture;
@@ -9,8 +10,6 @@ use rustls::RootCertStore;
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio::time::Timeout;
-
-use crate::vojo::app_error::AppError;
 
 #[derive(Clone)]
 pub struct HttpClients {
@@ -25,6 +24,7 @@ impl HttpClients {
             .build_http();
         let mut root_store = RootCertStore::empty();
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
         let tls = rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();

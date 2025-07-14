@@ -51,7 +51,7 @@ hyper = { version = "1.6.0", features = ["full"] }
 hyper-rustls = { version = "0.27.7", default-features = false, features = ["webpki-roots","native-tokio", "http1", "tls12", "logging"] }
 hyper-staticfile = "0.10.1"
 hyper-util = { version = "0.1.14", features = ["full"] }
-instant-acme = "0.7.2"
+instant-acme = {version="0.8.0",default-features = false,features = [ "hyper-rustls","ring"]}
 ipnet = "2.11.0"
 iprange = "0.6.7"
 jsonwebtoken = "9.3.1"
