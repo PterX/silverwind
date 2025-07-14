@@ -82,8 +82,7 @@ impl<'de> Deserialize<'de> for CorsAllowedOrigins {
                     Ok(CorsAllowedOrigins::All)
                 } else {
                     Err(E::custom(format!(
-                        "expected '*' or list of strings, found '{}'",
-                        value
+                        "expected '*' or list of strings, found '{value}'"
                     )))
                 }
             }
@@ -151,7 +150,7 @@ impl CorsConfig {
             .map(|m| m.as_str().to_uppercase())
             .collect::<Vec<String>>()
             .join(", ");
-        info!("methods: {}", methods);
+        info!("methods: {methods}");
         headers.insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,
             HeaderValue::from_str(&methods)?,
@@ -278,7 +277,7 @@ impl Display for CorsAllowHeader {
                     .map(|item| item.as_str())
                     .collect::<Vec<&str>>()
                     .join(", ");
-                write!(f, "{}", s)
+                write!(f, "{s}")
             }
         }
     }

@@ -1,0 +1,11 @@
+log_level: info
+servers:
+  - listen: 8084
+    protocol: http
+    routes:
+      - matcher:
+          prefix: /
+          prefix_rewrite : /
+        forward_to: grpc://grpcb.in:9000
+        transcode: 
+          proto_descriptor_set: "./config/examples/hello.pb"

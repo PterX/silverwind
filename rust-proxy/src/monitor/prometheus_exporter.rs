@@ -1,7 +1,28 @@
 use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use prometheus::{labels, opts, register_counter_vec, register_gauge, register_histogram_vec};
-use prometheus::{CounterVec, Gauge, Histogram, HistogramVec};
+use prometheus::{CounterVec, Gauge, HistogramVec};
+pub mod metrics {
+    use super::*;
 
+    pub static HTTP_REQUESTS_TOTAL: Lazy<CounterVec> = Lazy::new(|| {
+        register_counter_vec!(
+            "http_requests_total",
+            "Total number of HTTP requests.",
+            &["mapping_key", "path", "method", "status"]
+        )
+        .expect("Failed to create http_requests_total counter")
+    });
+
+    pub static HTTP_REQUEST_DURATION_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+        register_histogram_vec!(
+            "http_request_duration_seconds",
+            "The HTTP request latencies in seconds.",
+            &["mapping_key", "path", "method"]
+        )
+        .expect("Failed to create http_request_duration_seconds histogram")
+    });
+}
 lazy_static! {
     static ref HTTP_COUNTER: CounterVec = register_counter_vec!(
         opts!("spire_http_requests_total", "Number of HTTP requests made.",),
@@ -20,20 +41,4 @@ lazy_static! {
         &["port", "request_path"]
     )
     .unwrap();
-}
-pub fn inc(key: String, path: String, code: u16) {
-    HTTP_COUNTER
-        .with_label_values(&[key.as_str(), path.as_str(), code.to_string().as_str()])
-        .inc();
-    HTTP_COUNTER
-        .with_label_values(&[key.as_str(), "all", "all"])
-        .inc();
-    HTTP_COUNTER.with_label_values(&["all", "all", "all"]).inc();
-}
-pub fn get_timer_list(key: String, path: String) -> Vec<Histogram> {
-    vec![
-        HTTP_REQ_HISTOGRAM.with_label_values(&[key.as_str(), path.as_str()]),
-        HTTP_REQ_HISTOGRAM.with_label_values(&[key.as_str(), "all"]),
-        HTTP_REQ_HISTOGRAM.with_label_values(&["all", "all"]),
-    ]
 }

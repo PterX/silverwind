@@ -112,19 +112,21 @@ services:
 ![alt tag](https://raw.githubusercontent.com/lsk569937453/image_repo/main/api-gateway.png)
 
 ## Spire has implemented the following functions:
-
+- http/grpc/websocket/tcp proxy
 - IP Allow-and-Deny list
-- Authentication(Basic Auth,ApiKey Auth)
+- Authentication(Basic Auth,ApiKey Auth，JWT Auth)
 - Rate limiting(Token Bucket,Fixed Window)
 - Routing
-- Load Balancing(Poll,Random,Weight,Header Based)
+- Load Balancing(Poll,Random,Weight(Canary Release),Header Based)
 - HealthCheck&AnomalyDetection
 - Free Https Certificate
 - Dynamic Configuration(Rest Api)
 - Dashboard For Spire
 - Monitoring(Prometheus)
+- Circuit Breaker
+- Protocol Translation(Http To Grpc)
+- Header Rewrite
+- CORS
 
 ## Future
-
-- [ ] Protocol Translation
 - [ ] Caching

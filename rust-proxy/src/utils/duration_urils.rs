@@ -27,7 +27,7 @@ pub mod human_duration {
             // 默认无单位为秒
             s.parse::<f64>()
                 .map(Duration::from_secs_f64)
-                .map_err(|_| format!("invalid duration format: '{}'", s))
+                .map_err(|_| format!("invalid duration format: '{s}'"))
         }
     }
 

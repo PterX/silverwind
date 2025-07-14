@@ -1,126 +1,123 @@
 use super::app_error::AppError;
+use crate::app_error;
 use crate::control_plane::lets_encrypt::LetsEncryptActions;
 use axum::extract::State;
 use axum::{extract::Path, http::StatusCode, routing::any, Router};
-use hyper_util::client::legacy::Client as HyperClient;
-use hyper_util::rt::TokioExecutor;
+use instant_acme::Authorizations;
 use instant_acme::LetsEncrypt;
 use instant_acme::NewAccount;
+use instant_acme::RetryPolicy;
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, NewOrder, OrderStatus,
 };
-use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use tokio::sync::oneshot;
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 
 pub struct LetsEntrypt {
     pub mail_name: String,
     pub domain_name: String,
 }
-impl LetsEncryptActions for LetsEntrypt {
-    async fn start_request2(&self) -> Result<String, AppError> {
-        let account = local_account(self.mail_name.clone()).await?;
-        info!("account created");
-        let domain_name = self.domain_name.clone();
-        let domain = domain_name.as_str();
-        let mut order = account
-            .new_order(&NewOrder {
-                identifiers: &[Identifier::Dns(domain.to_string())],
-            })
-            .await?;
-        let authorizations = order.authorizations().await?;
+impl LetsEntrypt {
+    async fn spawn_challenge_server(
+        &self,
+        authorizations: &mut Authorizations<'_>,
+    ) -> Result<(oneshot::Sender<()>, tokio::task::JoinHandle<()>), AppError> {
+        let mut challenges = HashMap::new();
+        while let Some(authz_result) = authorizations.next().await {
+            let mut authz = authz_result?;
+            if authz.status != AuthorizationStatus::Pending {
+                info!(
+                    "Skipping authorization for identifier '{}' with status: {:?}",
+                    authz.identifier(),
+                    authz.status
+                );
+                continue;
+            }
 
-        let authorization = authorizations
-            .first()
-            .ok_or(AppError("there should be one authorization".to_string()))?;
+            info!(
+                "Processing pending authorization for identifier: '{}'",
+                authz.identifier()
+            );
 
-        if !matches!(authorization.status, AuthorizationStatus::Pending) {
-            Err(AppError("order should be pending".to_string()))?;
+            let mut challenge = authz.challenge(ChallengeType::Http01).ok_or_else(|| {
+                AppError("No http01 challenge found for this authorization".to_string())
+            })?;
+
+            let key_auth = challenge.key_authorization().as_str().to_string();
+            let token = key_auth
+                .split('.')
+                .next()
+                .ok_or_else(|| AppError("Could not split token from key_auth string".to_string()))?
+                .to_string();
+            info!("token is {token},key_auth is {key_auth}");
+            challenges.insert(token.clone(), key_auth);
+            info!("Setting challenge ready for token: {token}");
+            challenge.set_ready().await?;
         }
-        let challenge = authorization
-            .challenges
-            .iter()
-            .find(|c| c.r#type == ChallengeType::Http01)
-            .ok_or_else(|| AppError("no http01 challenge found".to_string()))?;
 
-        let challenges = HashMap::from([(
-            challenge.token.clone(),
-            order.key_authorization(challenge).as_str().to_string(),
-        )]);
-        info!("challenges: {:?}", challenges);
+        if challenges.is_empty() {
+            "No pending authorizations found to challenge.".to_string();
+        }
+
+        info!("Preparing challenges: {:?}", challenges.keys());
         let acme_router = acme_router(challenges);
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
         let listener = tokio::net::TcpListener::bind("0.0.0.0:80").await?;
+
         let server_handle = tokio::task::spawn(async move {
             axum::serve(listener, acme_router)
                 .with_graceful_shutdown(async {
                     let _ = shutdown_rx.await;
+                    info!("Gracefully shutting down ACME challenge server.");
                 })
                 .await
-                .unwrap()
+                .unwrap();
         });
-        info!("Serving ACME handler at: 0.0.0.0:80");
-        let result = async {
-            order.set_challenge_ready(&challenge.url).await?;
-            let mut tries = 1u8;
-            let mut delay = Duration::from_millis(250);
-            loop {
-                tokio::time::sleep(delay).await;
-                let state = order.refresh().await?;
-                if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
-                    info!("order state: {:#?}", state);
-                    break;
-                }
 
-                delay *= 2;
-                tries += 1;
-                if tries < 15 {
-                    info!("order is not ready, waiting {delay:?},{:?}{}", state, tries);
-                } else {
-                    error!(
-                        "timed out before order reached ready state: {state:#?},{}",
-                        tries,
-                    );
-                    Err(AppError(
-                        "timed out before order reached ready state".to_string(),
-                    ))?;
-                }
-            }
-
-            let state = order.state();
-            if state.status != OrderStatus::Ready {
-                Err(AppError(format!(
-                    "unexpected order status: {:?}",
-                    state.status
-                )))?;
-            }
-
-            info!("challenge completed,{:?}", state);
-
-            let mut params = CertificateParams::new(vec![domain.to_owned()])?;
-            params.distinguished_name = DistinguishedName::new();
-            let private_key = KeyPair::generate()?;
-            let signing_request = params.serialize_request(&private_key)?;
-
-            order.finalize(signing_request.der()).await?;
-
-            let mut cert_chain_pem: Option<String> = None;
-            let mut retries = 5;
-            while cert_chain_pem.is_none() && retries > 0 {
-                cert_chain_pem = order.certificate().await?;
-                retries -= 1;
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-            cert_chain_pem.ok_or_else(|| AppError("certificate timeout".to_string()))
+        Ok((shutdown_tx, server_handle))
+    }
+}
+impl LetsEncryptActions for LetsEntrypt {
+    async fn start_request2(&self) -> Result<String, AppError> {
+        let account = local_account().await?;
+        info!("Account created successfully.");
+        let identifiers = [Identifier::Dns(self.domain_name.clone())];
+        let mut order = account.new_order(&NewOrder::new(&identifiers)).await?;
+        let mut authorizations = order.authorizations();
+        let (shutdown_tx, server_handle) = self.spawn_challenge_server(&mut authorizations).await?;
+        info!("ACME challenge server is running at 0.0.0.0:80.");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let status = order
+            .poll_ready(
+                &RetryPolicy::default()
+                    .backoff(1.0)
+                    .initial_delay(Duration::from_secs(1))
+                    .timeout(Duration::from_secs(60)),
+            )
+            .await?;
+        if status != OrderStatus::Ready {
+            let _ = shutdown_tx.send(());
+            server_handle.await.ok();
+            return Err(app_error!(
+                "Order status is not 'Ready', but '{:?}'",
+                status
+            ));
         }
-        .await;
+
+        info!("Order is ready, proceeding to finalization.");
+        let private_key_pem = order.finalize().await?;
+        info!("Order finalized. Polling for the certificate.");
+        let cert_chain_pem = order.poll_certificate(&RetryPolicy::default()).await?;
+        info!("Certificate obtained successfully. Shutting down challenge server.");
         let _ = shutdown_tx.send(());
         server_handle.await.ok();
 
-        result
+        info!("private key:\n{private_key_pem}");
+        Ok(cert_chain_pem)
     }
 }
 impl LetsEntrypt {
@@ -135,11 +132,11 @@ pub async fn http01_challenge(
     State(challenges): State<HashMap<String, String>>,
     Path(token): Path<String>,
 ) -> Result<String, StatusCode> {
-    info!("received HTTP-01 ACME challenge,{}", token);
+    info!("received HTTP-01 ACME challenge,{token}");
 
     if let Some(key_auth) = challenges.get(&token) {
         Ok({
-            info!("responding to ACME challenge,{}", key_auth);
+            info!("responding to ACME challenge,{key_auth}");
             key_auth.clone()
         })
     } else {
@@ -148,45 +145,30 @@ pub async fn http01_challenge(
     }
 }
 
-/// Set up a simple acme server to respond to http01 challenges.
 pub fn acme_router(challenges: HashMap<String, String>) -> Router {
     Router::new()
         .route("/.well-known/acme-challenge/{*rest}", any(http01_challenge))
         .with_state(challenges)
 }
 use rustls::crypto::ring;
-use rustls::RootCertStore;
-async fn local_account(_mail_name: String) -> Result<Account, AppError> {
+async fn local_account() -> Result<Account, AppError> {
     info!("installing ring");
     let _ = ring::default_provider().install_default();
     info!("installing ring done");
-    let root_store = RootCertStore {
-        roots: webpki_roots::TLS_SERVER_ROOTS.into(),
-    };
-    let roots = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-    info!("creating test account1");
-    let https = HyperClient::builder(TokioExecutor::new()).build(
-        hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(roots)
-            .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .build(),
-    );
-    info!("creating test account2");
-    let (account, _) = Account::create_with_http(
-        &NewAccount {
-            contact: &[],
-            terms_of_service_agreed: true,
-            only_return_existing: false,
-        },
-        LetsEncrypt::Staging.url().to_owned().as_str(),
-        None,
-        Box::new(https.clone()),
-    )
-    .await?;
+
+    info!("creating test account");
+    let account_builder = Account::builder()?;
+    let (account, _) = account_builder
+        .create(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: false,
+            },
+            LetsEncrypt::Production.url().to_owned(),
+            None,
+        )
+        .await?;
     Ok(account)
 }
 #[cfg(test)]
@@ -230,7 +212,7 @@ mod tests {
                 .clone()
                 .oneshot(
                     Request::builder()
-                        .uri(format!("/.well-known/acme-challenge/{}", token))
+                        .uri(format!("/.well-known/acme-challenge/{token}"))
                         .body(axum::body::Body::empty())
                         .unwrap(),
                 )

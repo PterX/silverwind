@@ -32,11 +32,11 @@ impl Middleware for RequestHeaders {
         }
         for (key, value) in &self.add {
             let header_name = HeaderName::from_str(key)
-                .map_err(|e| AppError(format!("Invalid header name '{}': {}", key, e)))?;
+                .map_err(|e| AppError(format!("Invalid header name '{key}': {e}")))?;
 
             let header_value = HeaderValue::from_str(value)
-                .map_err(|e| AppError(format!("Invalid header value for '{}': {}", key, e)))?;
-            debug!("Adding header: {}: {}", key, value);
+                .map_err(|e| AppError(format!("Invalid header value for '{key}': {e}")))?;
+            debug!("Adding header: {key}: {value}");
             headers.insert(header_name, header_value);
         }
         Ok(())

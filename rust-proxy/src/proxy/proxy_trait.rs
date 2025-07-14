@@ -67,19 +67,13 @@ impl DestinationResult {
             _ => None,
         }
     }
-
-    pub fn as_denial(&self) -> Option<&Denial> {
-        match self {
-            Self::NotAllowed(ref denial) => Some(denial),
-            _ => None,
-        }
-    }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 
 pub enum RouterDestination {
     Http(BaseRoute),
     File(StaticFileRoute),
+    Grpc(BaseRoute),
 }
 
 impl ChainTrait for CommonCheckRequest {
@@ -134,7 +128,7 @@ impl ChainTrait for CommonCheckRequest {
             .ok_or(AppError::from(
                 "Can not find config by port from app config.",
             ))?;
-        debug!("api_service_config: {:?}", api_service);
+        debug!("api_service_config: {api_service:?}");
         for item in api_service.route_configs.iter_mut() {
             let match_result = item.is_matched(backend_path, Some(headers))?;
             if match_result.is_none() {
@@ -167,6 +161,14 @@ impl ChainTrait for CommonCheckRequest {
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path,
                         router_destination: RouterDestination::Http(base_route.clone()),
+                    }));
+                }
+                RouterDestination::Grpc(base_route) => {
+                    // let request_path = [base_route.endpoint.as_str(), rest_path.as_str()].join("/");
+                    spire_context.middlewares = item.middlewares.clone();
+                    return Ok(DestinationResult::Matched(HandlingResult {
+                        request_path: rest_path,
+                        router_destination: RouterDestination::Grpc(base_route.clone()),
                     }));
                 }
             }
@@ -261,13 +263,8 @@ impl RouterDestination {
         match self {
             RouterDestination::Http(base_route) => base_route.endpoint.clone(),
             RouterDestination::File(static_file_route) => static_file_route.doc_root.clone(),
-        }
-    }
 
-    pub fn is_file(&self) -> bool {
-        match self {
-            RouterDestination::Http(_) => false,
-            RouterDestination::File(_) => true,
+            RouterDestination::Grpc(base_route) => base_route.endpoint.clone(),
         }
     }
 }
@@ -322,9 +319,6 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
-        // assert!(result.is_some());
-        // let check_result = result.unwrap();
-        // assert_eq!(check_result.request_path, "http://backend.test.com/users");
     }
 
     #[tokio::test]

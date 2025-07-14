@@ -97,19 +97,20 @@ Spire 将会监听 8084 端口。
 ![alt tag](https://raw.githubusercontent.com/lsk569937453/image_repo/main/api-gateway.png)
 
 ## Spire 已经实现了如下功能
-
+- http/grpc/websocket/tcp 代理
 - IP 黑白名单
-- 授权(Basic Auth,ApiKey Auth)
+- 授权(Basic Auth,ApiKey Auth,JWT Auth)
 - 限流(Token Bucket,Fixed Window)
 - 路由
-- 负载均衡(论询，随机，基于权重,基于 Header)
+- 负载均衡(论询，随机，基于权重(金丝雀发布),基于 Header)
 - 动态配置(Rest Api)
 - 健康检查&异常检测
 - 免费 Https 证书
 - 控制面板
 - 监控(Prometheus)
-
+- 熔断
+- 协议转换(http协议转 grpc 协议)
+- Header重写
+- CORS配置
 ## 将来会实现的功能
-
-- [ ] 协议转换
 - [ ] 缓存

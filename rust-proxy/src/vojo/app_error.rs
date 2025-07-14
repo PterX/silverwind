@@ -7,10 +7,12 @@ use http::header::InvalidHeaderValue;
 use http::header::ToStrError;
 use http::uri::InvalidUriParts;
 use http::StatusCode;
+use prost_reflect::DescriptorError;
 use rustls_pki_types::InvalidDnsNameError;
 use std::sync::PoisonError;
 use std::time::SystemTimeError;
 use thiserror::Error;
+use tonic::Status;
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[error("Error is: {0}")]
 pub struct AppError(pub String);
@@ -19,7 +21,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = (StatusCode::INTERNAL_SERVER_ERROR, self.to_string());
 
-        error!("Error processing request: {}", self);
+        error!("Error processing request: {self}");
 
         (status, error_message).into_response()
     }
@@ -28,6 +30,11 @@ impl IntoResponse for AppError {
 macro_rules! app_error {
     ($($arg:tt)*) => {
         AppError(format!($($arg)*))
+    }
+}
+impl From<Status> for AppError {
+    fn from(status: Status) -> Self {
+        AppError(format!("Status error: {status}"))
     }
 }
 impl From<&str> for AppError {
@@ -46,6 +53,21 @@ macro_rules! impl_poison_error_for_app_error {
 }
 impl_poison_error_for_app_error!(rate_limit::Ratelimit, "Rate limit");
 impl_poison_error_for_app_error!(circuit_breaker::CircuitBreaker, "Circuit breaker");
+impl From<prost_reflect::prost::DecodeError> for AppError {
+    fn from(error: prost_reflect::prost::DecodeError) -> Self {
+        AppError(format!("Protobuf decode error: {error}"))
+    }
+}
+impl From<DescriptorError> for AppError {
+    fn from(error: DescriptorError) -> Self {
+        AppError(format!("Descriptor error: {error}"))
+    }
+}
+impl From<tonic::transport::Error> for AppError {
+    fn from(error: tonic::transport::Error) -> Self {
+        AppError(format!("Tonic transport error: {error}"))
+    }
+}
 impl From<std::convert::Infallible> for AppError {
     fn from(_: std::convert::Infallible) -> Self {
         AppError("Infallible error".to_string())
@@ -53,144 +75,142 @@ impl From<std::convert::Infallible> for AppError {
 }
 impl From<std::num::ParseIntError> for AppError {
     fn from(error: std::num::ParseIntError) -> Self {
-        AppError(format!("Parse int error: {}", error))
+        AppError(format!("Parse int error: {error}"))
     }
 }
 impl From<delay_timer::error::TaskError> for AppError {
     fn from(error: delay_timer::error::TaskError) -> Self {
-        AppError(format!("Task error: {}", error))
+        AppError(format!("Task error: {error}"))
     }
 }
 impl From<tracing_subscriber::util::TryInitError> for AppError {
     fn from(error: tracing_subscriber::util::TryInitError) -> Self {
         AppError(format!(
-            "Tracing subscriber initialization error: {}",
-            error
+            "Tracing subscriber initialization error: {error}"
         ))
     }
 }
 impl From<tracing_appender::rolling::InitError> for AppError {
     fn from(error: tracing_appender::rolling::InitError) -> Self {
         AppError(format!(
-            "Rolling file appender initialization error: {}",
-            error
+            "Rolling file appender initialization error: {error}"
         ))
     }
 }
 impl From<tokio::time::error::Elapsed> for AppError {
     fn from(error: tokio::time::error::Elapsed) -> Self {
-        AppError(format!("Timeout error: {}", error))
+        AppError(format!("Timeout error: {error}"))
     }
 }
 impl From<InvalidHeaderValue> for AppError {
     fn from(error: InvalidHeaderValue) -> Self {
-        AppError(format!("Invalid header value: {}", error))
+        AppError(format!("Invalid header value: {error}"))
     }
 }
 impl From<hyper_util::client::legacy::Error> for AppError {
     fn from(error: hyper_util::client::legacy::Error) -> Self {
-        AppError(format!("Hyper client error: {}", error))
+        AppError(format!("Hyper client error: {error}"))
     }
 }
 impl From<http::uri::InvalidUri> for AppError {
     fn from(error: http::uri::InvalidUri) -> Self {
-        AppError(format!("Invalid URI: {}", error))
+        AppError(format!("Invalid URI: {error}"))
     }
 }
 impl From<InvalidUriParts> for AppError {
     fn from(error: InvalidUriParts) -> Self {
-        AppError(format!("Invalid URI parts: {}", error))
+        AppError(format!("Invalid URI parts: {error}"))
     }
 }
 impl From<ipnet::AddrParseError> for AppError {
     fn from(error: ipnet::AddrParseError) -> Self {
-        AppError(format!("IP address parse error: {}", error))
+        AppError(format!("IP address parse error: {error}"))
     }
 }
 impl From<SystemTimeError> for AppError {
     fn from(error: SystemTimeError) -> Self {
-        AppError(format!("System time error: {}", error))
+        AppError(format!("System time error: {error}"))
     }
 }
 impl From<InvalidDnsNameError> for AppError {
     fn from(error: InvalidDnsNameError) -> Self {
-        AppError(format!("Invalid DNS name error: {}", error))
+        AppError(format!("Invalid DNS name error: {error}"))
     }
 }
 impl From<rcgen::Error> for AppError {
     fn from(error: rcgen::Error) -> Self {
-        AppError(format!("Certificate generation error: {}", error))
+        AppError(format!("Certificate generation error: {error}"))
     }
 }
 impl From<instant_acme::Error> for AppError {
     fn from(error: instant_acme::Error) -> Self {
-        AppError(format!("Instant ACME error: {}", error))
+        AppError(format!("Instant ACME error: {error}"))
     }
 }
 impl From<regex::Error> for AppError {
     fn from(error: regex::Error) -> Self {
-        AppError(format!("Regex error: {}", error))
+        AppError(format!("Regex error: {error}"))
     }
 }
 impl From<std::net::AddrParseError> for AppError {
     fn from(error: std::net::AddrParseError) -> Self {
-        AppError(format!("Address parse error: {}", error))
+        AppError(format!("Address parse error: {error}"))
     }
 }
 
 impl From<h2::Error> for AppError {
     fn from(error: h2::Error) -> Self {
-        AppError(format!("H2 error: {}", error))
+        AppError(format!("H2 error: {error}"))
     }
 }
 impl From<hyper::Error> for AppError {
     fn from(error: hyper::Error) -> Self {
-        AppError(format!("Hyper error: {}", error))
+        AppError(format!("Hyper error: {error}"))
     }
 }
 impl From<axum::Error> for AppError {
     fn from(error: axum::Error) -> Self {
-        AppError(format!("Axum error: {}", error))
+        AppError(format!("Axum error: {error}"))
     }
 }
 impl From<ToStrError> for AppError {
     fn from(error: ToStrError) -> Self {
-        AppError(format!("Header to string error: {}", error))
+        AppError(format!("Header to string error: {error}"))
     }
 }
 impl From<serde_yaml::Error> for AppError {
     fn from(error: serde_yaml::Error) -> Self {
-        AppError(format!("YAML error: {}", error))
+        AppError(format!("YAML error: {error}"))
     }
 }
 impl From<std::io::Error> for AppError {
     fn from(error: std::io::Error) -> Self {
-        AppError(format!("IO error: {}", error))
+        AppError(format!("IO error: {error}"))
     }
 }
 impl From<url::ParseError> for AppError {
     fn from(error: url::ParseError) -> Self {
-        AppError(format!("URL parse error: {}", error))
+        AppError(format!("URL parse error: {error}"))
     }
 }
 impl From<rustls::Error> for AppError {
     fn from(error: rustls::Error) -> Self {
-        AppError(format!("TLS error: {}", error))
+        AppError(format!("TLS error: {error}"))
     }
 }
 impl From<http::Error> for AppError {
     fn from(error: http::Error) -> Self {
-        AppError(format!("HTTP error: {}", error))
+        AppError(format!("HTTP error: {error}"))
     }
 }
 impl From<PoisonError<std::sync::MutexGuard<'_, AppConfig>>> for AppError {
     fn from(error: PoisonError<std::sync::MutexGuard<'_, AppConfig>>) -> Self {
-        AppError(format!("Mutex error: {}", error))
+        AppError(format!("Mutex error: {error}"))
     }
 }
 impl From<serde_json::Error> for AppError {
     fn from(error: serde_json::Error) -> Self {
-        AppError(format!("JSON error: {}", error))
+        AppError(format!("JSON error: {error}"))
     }
 }
 #[cfg(test)]
@@ -314,12 +334,12 @@ mod tests {
     #[test]
     fn test_from_parse_int_error() {
         let original_error = create_parse_int_error();
-        let expected_message = format!("Parse int error: {}", original_error);
+        let expected_message = format!("Parse int error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
         assert_eq!(
             app_error.to_string(),
-            format!("Error is: {}", expected_message)
+            format!("Error is: {expected_message}")
         );
     }
     #[test]
@@ -327,7 +347,7 @@ mod tests {
         let original_error = delay_timer::error::TaskError::DisGetEvent(
             delay_timer::prelude::channel::TryRecvError::Closed,
         );
-        let expected_message = format!("Task error: {}", original_error);
+        let expected_message = format!("Task error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -335,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn test_from_tokio_time_elapsed() {
         let original_error = create_elapsed_error().await;
-        let expected_message = format!("Timeout error: {}", original_error);
+        let expected_message = format!("Timeout error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -343,7 +363,7 @@ mod tests {
     #[test]
     fn test_from_invalid_header_value() {
         let original_error = create_invalid_header_value();
-        let expected_message = format!("Invalid header value: {}", original_error);
+        let expected_message = format!("Invalid header value: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -351,7 +371,7 @@ mod tests {
     #[test]
     fn test_from_http_uri_invalid_uri() {
         let original_error = create_invalid_uri_error();
-        let expected_message = format!("Invalid URI: {}", original_error);
+        let expected_message = format!("Invalid URI: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -359,7 +379,7 @@ mod tests {
     #[test]
     fn test_from_invalid_uri_parts() {
         let original_error = create_invalid_uri_parts_error();
-        let expected_message = format!("Invalid URI parts: {}", original_error);
+        let expected_message = format!("Invalid URI parts: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -367,7 +387,7 @@ mod tests {
     #[test]
     fn test_from_ipnet_addr_parse_error() {
         let original_error = create_ipnet_addr_parse_error();
-        let expected_message = format!("IP address parse error: {}", original_error);
+        let expected_message = format!("IP address parse error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -375,7 +395,7 @@ mod tests {
     #[test]
     fn test_from_system_time_error() {
         let original_error = create_system_time_error();
-        let expected_message = format!("System time error: {}", original_error);
+        let expected_message = format!("System time error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -383,7 +403,7 @@ mod tests {
     #[test]
     fn test_from_invalid_dns_name_error() {
         let original_error = create_invalid_dns_name_error();
-        let expected_message = format!("Invalid DNS name error: {}", original_error);
+        let expected_message = format!("Invalid DNS name error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -391,7 +411,7 @@ mod tests {
     #[test]
     fn test_from_rcgen_error() {
         let original_error = create_rcgen_error();
-        let expected_message = format!("Certificate generation error: {}", original_error);
+        let expected_message = format!("Certificate generation error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -399,7 +419,7 @@ mod tests {
     #[test]
     fn test_from_instant_acme_error() {
         let original_error = create_instant_acme_error();
-        let expected_message = format!("Instant ACME error: {}", original_error);
+        let expected_message = format!("Instant ACME error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -407,7 +427,7 @@ mod tests {
     #[test]
     fn test_from_regex_error() {
         let original_error = create_regex_error();
-        let expected_message = format!("Regex error: {}", original_error);
+        let expected_message = format!("Regex error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -415,7 +435,7 @@ mod tests {
     #[test]
     fn test_from_std_net_addr_parse_error() {
         let original_error = create_std_net_addr_parse_error();
-        let expected_message = format!("Address parse error: {}", original_error);
+        let expected_message = format!("Address parse error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -423,7 +443,7 @@ mod tests {
     #[test]
     fn test_from_h2_error() {
         let original_error = create_h2_error();
-        let expected_message = format!("H2 error: {}", original_error);
+        let expected_message = format!("H2 error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -431,7 +451,7 @@ mod tests {
     #[test]
     fn test_from_axum_error() {
         let original_error = create_axum_error();
-        let expected_message = format!("Axum error: {}", original_error);
+        let expected_message = format!("Axum error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -439,7 +459,7 @@ mod tests {
     #[test]
     fn test_from_to_str_error() {
         let original_error = create_to_str_error();
-        let expected_message = format!("Header to string error: {}", original_error);
+        let expected_message = format!("Header to string error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -447,7 +467,7 @@ mod tests {
     #[test]
     fn test_from_serde_yaml_error() {
         let original_error = create_serde_yaml_error();
-        let expected_message = format!("YAML error: {}", original_error);
+        let expected_message = format!("YAML error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -455,7 +475,7 @@ mod tests {
     #[test]
     fn test_from_io_error() {
         let original_error = create_io_error();
-        let expected_message = format!("IO error: {}", original_error);
+        let expected_message = format!("IO error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -463,7 +483,7 @@ mod tests {
     #[test]
     fn test_from_url_parse_error() {
         let original_error = create_url_parse_error();
-        let expected_message = format!("URL parse error: {}", original_error);
+        let expected_message = format!("URL parse error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -471,7 +491,7 @@ mod tests {
     #[test]
     fn test_from_rustls_error() {
         let original_error = create_rustls_error();
-        let expected_message = format!("TLS error: {}", original_error);
+        let expected_message = format!("TLS error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -479,7 +499,7 @@ mod tests {
     #[test]
     fn test_from_http_error() {
         let original_error = create_http_error();
-        let expected_message = format!("HTTP error: {}", original_error);
+        let expected_message = format!("HTTP error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -497,7 +517,7 @@ mod tests {
         assert!(handle.join().is_err());
 
         let original_error = app_config_data.lock().unwrap_err();
-        let expected_message = format!("Mutex error: {}", original_error);
+        let expected_message = format!("Mutex error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }
@@ -505,7 +525,7 @@ mod tests {
     #[test]
     fn test_from_serde_json_error() {
         let original_error = create_serde_json_error();
-        let expected_message = format!("JSON error: {}", original_error);
+        let expected_message = format!("JSON error: {original_error}");
         let app_error: AppError = original_error.into();
         assert_eq!(app_error.0, expected_message);
     }

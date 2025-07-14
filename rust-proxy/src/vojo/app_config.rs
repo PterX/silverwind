@@ -79,6 +79,11 @@ pub struct LivenessStatus {
 fn is_empty(value: &str) -> bool {
     value.is_empty()
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Transcode {
+    pub proto_descriptor_set: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RouteConfig {
     #[serde(skip_serializing_if = "is_empty", default = "default_route_id")]
@@ -87,7 +92,8 @@ pub struct RouteConfig {
     pub host_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matcher: Option<Matcher>,
-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcode: Option<Transcode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anomaly_detection: Option<AnomalyDetectionType>,
     #[serde(skip_deserializing, skip_serializing)]
@@ -545,7 +551,7 @@ mod tests {
     fn test_app_config_serialize_with_static_config() {
         let app_config = create_default_app_config();
         let json_str = serde_yaml::to_string(&app_config).unwrap();
-        println!("{}", json_str);
+        println!("{json_str}");
     }
     use crate::DEFAULT_ADMIN_PORT;
     #[test]

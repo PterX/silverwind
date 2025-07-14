@@ -82,9 +82,9 @@ impl TaskKey {
         }
     }
 }
-async fn get_endpoint_list(mut route: RouteConfig) -> Vec<String> {
+async fn get_endpoint_list(route: RouteConfig) -> Vec<String> {
     let mut result = vec![];
-    let base_route_list = route.router.get_all_route().await.unwrap_or(vec![]);
+    let base_route_list = route.router.get_all_route().unwrap_or_default();
     for item in base_route_list {
         result.push(item.endpoint);
     }
@@ -149,7 +149,7 @@ impl HealthCheck {
             if !route_list.contains_key(route_id) {
                 let res = self.delay_timer.remove_task(*task_id);
                 if let Err(err) = res {
-                    error!("Health check task remove task error,the error is {}.", err);
+                    error!("Health check task remove task error,the error is {err}.");
                     return true;
                 } else {
                     return false;
@@ -163,7 +163,7 @@ impl HealthCheck {
             .iter()
             .filter(|(task_key, _)| !old_map.contains_key(&(*task_key).clone()))
             .for_each(|(task_key, route)| {
-                info!("The route is {:?}", route);
+                info!("The route is {route:?}");
                 let current_id = self.current_id.fetch_add(1, Ordering::SeqCst);
                 let submit_task_result = submit_task(
                     current_id,
@@ -187,13 +187,13 @@ impl HealthCheck {
 
 async fn do_http_health_check<HC: HttpClientTrait + Send + Sync + 'static>(
     http_health_check_param: HttpHealthCheckParam,
-    mut route: RouteConfig,
+    route: RouteConfig,
     timeout_number: i32,
     http_health_check_client: Arc<HC>,
     shared_config: SharedConfig,
 ) -> Result<(), AppError> {
-    info!("Do http health check,the route is {:?}!", route);
-    let route_list = route.router.get_all_route().await?;
+    info!("Do http health check,the route is {route:?}!");
+    let route_list = route.router.get_all_route()?;
     let mut set = JoinSet::new();
     for item in route_list {
         let http_client_shared = http_health_check_client.clone();
@@ -249,7 +249,7 @@ async fn do_http_health_check<HC: HttpClientTrait + Send + Sync + 'static>(
                 }
             }
             Err(e) => {
-                error!("set join error,the error is {}", e);
+                error!("set join error,the error is {e}");
             }
         }
     }

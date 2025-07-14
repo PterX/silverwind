@@ -34,9 +34,11 @@ use tracing_subscriber::reload::Handle;
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let reload_handle = setup_logger()?;
-
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
     if let Err(e) = run_app(reload_handle).await {
-        error!("Application failed to start:   {:?}", e);
+        error!("Application failed to start:   {e:?}");
         return Err(e);
     }
 
@@ -45,11 +47,11 @@ async fn main() -> Result<(), AppError> {
 
 async fn run_app(reload_handle: Handle<filter::Targets, Registry>) -> Result<(), AppError> {
     let cli = Cli::parse();
-    info!("CLI arguments parsed: {:?}", cli);
+    info!("CLI arguments parsed: {cli:?}");
 
     let config = load_config(&cli).await?;
     info!("Configuration loaded successfully.");
-    println!("Full configuration: {:?}", config);
+    println!("Full configuration: {config:?}");
 
     reconfigure_logger(&reload_handle, &config);
     info!("Logger reconfigured to level: {}", config.get_log_level());
@@ -60,7 +62,7 @@ async fn run_app(reload_handle: Handle<filter::Targets, Registry>) -> Result<(),
     app_config_service::init(shared_config.clone()).await?;
     info!("Configuration service initialized.");
 
-    info!("Starting control plane on port {}...", admin_port);
+    info!("Starting control plane on port {admin_port}...");
     start_control_plane(admin_port, shared_config).await?;
 
     info!("Application shut down gracefully. ");
@@ -80,6 +82,7 @@ fn reconfigure_logger(
     let mut targets = vec![
         ("delay_timer", LevelFilter::OFF),
         ("hyper_util", LevelFilter::OFF),
+        ("h2", LevelFilter::OFF),
     ];
 
     if !static_config.health_check_log_enabled.unwrap_or(false) {
@@ -123,10 +126,7 @@ mod tests {
         let paths = match std::fs::read_dir("config/examples") {
             Ok(paths) => paths,
             Err(e) => {
-                println!(
-                    "Skipping test: config/examples directory not found. Error: {}",
-                    e
-                );
+                println!("Skipping test: config/examples directory not found. Error: {e}");
                 return Ok(());
             }
         };
@@ -140,9 +140,8 @@ mod tests {
                 let config_str = tokio::fs::read_to_string(&path).await?;
 
                 serde_yaml::from_str::<AppConfig>(&config_str).map_err(|e| {
-                    let error_msg =
-                        format!("Failed to parse config file '{}': {}", file_path_str, e);
-                    eprintln!("{}", error_msg);
+                    let error_msg = format!("Failed to parse config file '{file_path_str}': {e}");
+                    eprintln!("{error_msg}");
                     AppError(error_msg)
                 })?;
             }
@@ -151,7 +150,7 @@ mod tests {
     }
     fn create_temp_config_file(content: &str) -> NamedTempFile {
         let mut file = NamedTempFile::new().expect("Failed to create temp file");
-        write!(file, "{}", content).expect("Failed to write to temp file");
+        write!(file, "{content}").expect("Failed to write to temp file");
         file
     }
 
@@ -176,13 +175,13 @@ servers:
         let config_file = create_temp_config_file(yaml_content);
         let config_path_str = config_file.path().to_str().unwrap();
         let cli = Cli::try_parse_from(vec!["spire", "-f", config_path_str]);
-        println!("cli: {:?}", cli);
+        println!("cli: {cli:?}");
         assert!(cli.is_ok());
         let cli = cli.unwrap();
 
         let result = load_config(&cli).await;
 
-        println!("result: {:?}", result);
+        println!("result: {result:?}");
         assert!(result.is_ok());
     }
 

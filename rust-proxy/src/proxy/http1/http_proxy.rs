@@ -1,6 +1,6 @@
 use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
-use crate::monitor::prometheus_exporter::{get_timer_list, inc};
-use crate::proxy::http1::http_client::HttpClients;
+use crate::monitor::prometheus_exporter::metrics;
+use crate::proxy::http1::app_clients::AppClients;
 use crate::proxy::proxy_trait::DestinationResult;
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::SharedConfig;
@@ -15,14 +15,12 @@ use hyper::StatusCode;
 use crate::proxy::http1::websocket_proxy::server_upgrade;
 use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
 use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
-use http::uri::PathAndQuery;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
-use prometheus::HistogramTimer;
 use rustls_pki_types::CertificateDer;
 use serde_json::json;
 use std::io::BufReader;
@@ -44,12 +42,12 @@ impl HttpProxy {
     pub async fn start_http_server(&mut self) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
-        let client = HttpClients::new();
+        let client = AppClients::new(self.shared_config.clone(), self.port).await?;
         let mapping_key_clone1 = self.mapping_key.clone();
         let reveiver = &mut self.channel;
 
         let listener = TcpListener::bind(addr).await?;
-        info!("Listening on http://{}", addr);
+        info!("Listening on http://{addr}");
         loop {
             tokio::select! {
                Ok((stream,addr))= listener.accept()=>{
@@ -74,7 +72,7 @@ impl HttpProxy {
                         )
                         .await
                     {
-                        error!("Error serving connection: {:?}", err);
+                        error!("Error serving connection: {err:?}");
                     }
                 });
                 },
@@ -94,7 +92,7 @@ impl HttpProxy {
     ) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
-        let client = HttpClients::new();
+        let client = AppClients::new(self.shared_config.clone(), self.port).await?;
         let mapping_key_clone1 = self.mapping_key.clone();
 
         let mut cer_reader = BufReader::new(pem_str.as_bytes());
@@ -115,7 +113,7 @@ impl HttpProxy {
         let reveiver = &mut self.channel;
 
         let listener = TcpListener::bind(addr).await?;
-        info!("Listening on http://{}", addr);
+        info!("Listening on http://{addr}");
         loop {
             tokio::select! {
                     Ok((tcp_stream,addr))= listener.accept()=>{
@@ -140,7 +138,7 @@ impl HttpProxy {
                         proxy_adapter(cloned_port,cloned_shared_config.clone(),client.clone(), req, mapping_key2.clone(), addr)
                     });
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                        error!("Error serving connection: {:?}", err);
+                        error!("Error serving connection: {err:?}");
                     }
                 });
             },
@@ -157,7 +155,7 @@ impl HttpProxy {
 async fn proxy_adapter(
     port: i32,
     shared_config: SharedConfig,
-    client: HttpClients,
+    client: AppClients,
     req: Request<BoxBody<Bytes, AppError>>,
     mapping_key: String,
     remote_addr: SocketAddr,
@@ -167,7 +165,7 @@ async fn proxy_adapter(
     match result {
         Ok(res) => Ok(res),
         Err(err) => {
-            error!("The error is {}.", err);
+            error!("The error is {err}.");
             let json_value = json!({
                 "error": err.to_string(),
             });
@@ -182,7 +180,7 @@ async fn proxy_adapter(
 async fn proxy_adapter_with_error(
     port: i32,
     shared_config: SharedConfig,
-    client: HttpClients,
+    client: AppClients,
     req: Request<BoxBody<Bytes, AppError>>,
     mapping_key: String,
     remote_addr: SocketAddr,
@@ -191,13 +189,16 @@ async fn proxy_adapter_with_error(
     let uri = req.uri().clone();
     let path = uri
         .path_and_query()
-        .unwrap_or(&PathAndQuery::from_static("/hello?world"))
+        .map(|p| p.as_str())
+        .unwrap_or("/")
         .to_string();
+
     let current_time = SystemTime::now();
-    let monitor_timer_list = get_timer_list(mapping_key.clone(), path.clone())
-        .iter()
-        .map(|item| item.start_timer())
-        .collect::<Vec<HistogramTimer>>();
+
+    let timer = metrics::HTTP_REQUEST_DURATION_SECONDS
+        .with_label_values(&[mapping_key.as_str(), path.as_str(), method.as_str()])
+        .start_timer();
+
     let res = proxy(
         port,
         shared_config,
@@ -209,7 +210,7 @@ async fn proxy_adapter_with_error(
     )
     .await
     .unwrap_or_else(|err| {
-        error!("The error is {}.", err);
+        error!("The error is {err}.");
         let json_value = json!({
             "response_code": -1,
             "response_object": format!("{}", err)
@@ -223,17 +224,25 @@ async fn proxy_adapter_with_error(
             )
             .unwrap()
     });
+    timer.observe_duration();
+    let status = res.status();
+    metrics::HTTP_REQUESTS_TOTAL
+        .with_label_values(&[
+            mapping_key.as_str(),
+            &path,
+            method.as_str(),
+            status.as_str(),
+        ])
+        .inc();
+
     let elapsed_time_res = current_time.elapsed()?;
-
-    let status = res.status().as_u16();
-    monitor_timer_list
-        .into_iter()
-        .for_each(|item| item.observe_duration());
-    inc(mapping_key.clone(), path.clone(), status);
-
     info!(
         "{} - -  \"{} {} HTTP/1.1\" {}  \"-\" \"-\"  {:?}",
-        remote_addr, method, path, status, elapsed_time_res
+        remote_addr,
+        method,
+        path,
+        status.as_u16(),
+        elapsed_time_res
     );
     Ok(res)
 }
@@ -241,13 +250,13 @@ async fn proxy_adapter_with_error(
 async fn proxy(
     port: i32,
     shared_config: SharedConfig,
-    client: HttpClients,
+    client: AppClients,
     mut req: Request<BoxBody<Bytes, AppError>>,
     mapping_key: String,
     remote_addr: SocketAddr,
     chain_trait: impl ChainTrait,
 ) -> Result<Response<BoxBody<Bytes, AppError>>, AppError> {
-    debug!("req: {:?}", req);
+    debug!("req: {req:?}");
 
     let inbound_headers = req.headers();
     let uri = req.uri().clone();
@@ -263,11 +272,11 @@ async fn proxy(
             &mut spire_context,
         )
         .await?;
-    debug!("The get_destination is {:?}", handling_result);
+    debug!("The get_destination is {handling_result:?}");
     let handling_result = match handling_result {
         DestinationResult::Matched(hr) => hr,
         DestinationResult::NotAllowed(denial) => {
-            debug!("Request denied: {:?}", denial);
+            debug!("Request denied: {denial:?}");
             let mut response = Response::builder().status(denial.status).body(
                 Full::new(Bytes::from(denial.body))
                     .map_err(AppError::from)
@@ -301,54 +310,86 @@ async fn proxy(
         && inbound_headers.contains_key(SEC_WEBSOCKET_KEY)
     {
         debug!(
-            "The request has been updated to websocket,the req is {:?}!",
-            req
+            "The request has been updated to websocket,the req is {req:?}!"
         );
-        return server_upgrade(req, handling_result, client).await;
+        return server_upgrade(req, handling_result, client.http).await;
     }
 
     let check_request = handling_result;
     let request_path = check_request.request_path.as_str();
     let router_destination = check_request.router_destination;
-    let mut res = if router_destination.is_file() {
-        let mut parts = req.uri().clone().into_parts();
-        parts.path_and_query = Some(request_path.try_into()?);
-        *req.uri_mut() = Uri::from_parts(parts)?;
-        route_file(router_destination, req).await
-    } else {
-        *req.uri_mut() = request_path.parse()?;
-        let host = req
-            .uri()
-            .host()
-            .ok_or("Uri to host cause error")?
-            .to_string();
-        req.headers_mut()
-            .insert(http::header::HOST, HeaderValue::from_str(&host)?);
-        if let Some(mut middlewares) = spire_context.middlewares.clone() {
-            if !middlewares.is_empty() {
-                chain_trait
-                    .handle_before_request(&mut middlewares, remote_addr, &mut req)
-                    .await?;
-            }
+    let mut res = match router_destination {
+        RouterDestination::File(ref _s) => {
+            let mut parts = req.uri().clone().into_parts();
+            parts.path_and_query = Some(request_path.try_into()?);
+            *req.uri_mut() = Uri::from_parts(parts)?;
+            route_file(router_destination, req).await
         }
-        let request_future = if request_path.contains("https") {
-            client.request_https(req, DEFAULT_HTTP_TIMEOUT)
-        } else {
-            client.request_http(req, DEFAULT_HTTP_TIMEOUT)
-        };
-        let response_result = match request_future.await {
-            Ok(response) => response.map_err(AppError::from),
-            _ => {
-                return Err(AppError(format!(
-                    "Request time out,the uri is {}",
-                    request_path
-                )))
+        RouterDestination::Http(_s) => {
+            *req.uri_mut() = request_path.parse()?;
+            let host = req
+                .uri()
+                .host()
+                .ok_or("Uri to host cause error")?
+                .to_string();
+            req.headers_mut()
+                .insert(http::header::HOST, HeaderValue::from_str(&host)?);
+            if let Some(mut middlewares) = spire_context.middlewares.clone() {
+                if !middlewares.is_empty() {
+                    chain_trait
+                        .handle_before_request(&mut middlewares, remote_addr, &mut req)
+                        .await?;
+                }
             }
-        };
-        response_result.map(|item| {
-            item.map(|s| s.boxed())
-                .map(|item: BoxBody<Bytes, hyper::Error>| item.map_err(AppError::from).boxed())
-        })
+            let request_future = if request_path.contains("https") {
+                client.http.request_https(req, DEFAULT_HTTP_TIMEOUT)
+            } else {
+                client.http.request_http(req, DEFAULT_HTTP_TIMEOUT)
+            };
+            let response_result = match request_future.await {
+                Ok(response) => response.map_err(AppError::from),
+                _ => {
+                    return Err(AppError(format!(
+                        "Request time out,the uri is {request_path}"
+                    )))
+                }
+            };
+            response_result.map(|item| {
+                item.map(|s| s.boxed())
+                    .map(|item: BoxBody<Bytes, hyper::Error>| item.map_err(AppError::from).boxed())
+            })
+        }
+        RouterDestination::Grpc(s) => {
+            info!("The request is grpc!,{request_path}");
+            let grpc_client = client
+                .grpc
+                .ok_or(AppError::from(""))?
+                .get_client(&s.endpoint)
+                .await?;
+
+            let body_bytes = req.collect().await?.to_bytes();
+            let parts: Vec<&str> = request_path.split('/').filter(|s| !s.is_empty()).collect();
+            if parts.len() < 2 {
+                return Err(AppError(request_path.to_string()));
+            }
+            let service_name = parts[0].to_string();
+            let method_name = parts[1].to_string();
+            let grpc_response = grpc_client
+                .do_request(service_name, method_name, body_bytes)
+                .await?;
+            let dynamic_message = grpc_response.into_inner();
+            let response_json_string = serde_json::to_string(&dynamic_message)?;
+            let response = Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(
+                    Full::new(Bytes::from(response_json_string))
+                        .map_err(|e| AppError(format!("Failed to create response body: {e}"))) // map_err 的类型是 Infallible，但为保持一致性仍可转换
+                        .boxed(),
+                )?;
+
+            Ok(response)
+        }
     };
     if let Some(mut middlewares) = spire_context.middlewares {
         if !middlewares.is_empty() {
@@ -415,10 +456,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_proxy_adapter_error_handling() {
-        let client = HttpClients::new();
         let shared_config = SharedConfig {
             shared_data: Arc::new(Mutex::new(AppConfig::default())),
         };
+        let client = AppClients::new(shared_config.clone(), 3302).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let req = Request::builder()
@@ -457,7 +499,6 @@ mod tests {
             HeaderValue::from_static("POST"),
         );
 
-        let client = HttpClients::new();
         let shared_config = SharedConfig {
             shared_data: Arc::new(Mutex::new(AppConfig {
                 api_service_config: HashMap::from([(
@@ -484,6 +525,8 @@ mod tests {
                 ..Default::default()
             })),
         };
+        let client = AppClients::new(shared_config.clone(), 8080).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let mut req = Request::builder()
@@ -503,7 +546,7 @@ mod tests {
             CommonCheckRequest {},
         )
         .await;
-        println!("result is {:?}", result);
+        println!("result is {result:?}");
         assert!(result.is_err());
     }
     #[tokio::test]
@@ -518,8 +561,9 @@ mod tests {
             HeaderValue::from_static("POST"),
         );
 
-        let client = HttpClients::new();
         let shared_config = SharedConfig::from_app_config(AppConfig::default());
+        let client = AppClients::new(shared_config.clone(), 8080).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let mut req = Request::builder()
@@ -545,7 +589,7 @@ mod tests {
             mock_chain_trait,
         )
         .await;
-        println!("result is {:?}", result);
+        println!("result is {result:?}");
         assert!(result.is_ok());
     }
     #[tokio::test]
@@ -560,8 +604,9 @@ mod tests {
             HeaderValue::from_static("POST"),
         );
 
-        let client = HttpClients::new();
         let shared_config = SharedConfig::from_app_config(AppConfig::default());
+        let client = AppClients::new(shared_config.clone(), 8080).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let mut req = Request::builder()
@@ -603,7 +648,7 @@ mod tests {
             mock_chain_trait,
         )
         .await;
-        println!("result is {:?}", result);
+        println!("result is {result:?}");
         assert!(result.is_err());
     }
     #[tokio::test]
@@ -618,8 +663,9 @@ mod tests {
             HeaderValue::from_static("POST"),
         );
 
-        let client = HttpClients::new();
         let shared_config = SharedConfig::from_app_config(AppConfig::default());
+        let client = AppClients::new(shared_config.clone(), 8080).await.unwrap();
+
         let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 
         let mut req = Request::builder()
@@ -655,7 +701,7 @@ mod tests {
             mock_chain_trait,
         )
         .await;
-        println!("result is {:?}", result);
+        println!("result is {result:?}");
         assert!(result.is_ok());
     }
     #[tokio::test]
