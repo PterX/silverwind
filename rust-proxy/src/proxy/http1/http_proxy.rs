@@ -47,7 +47,7 @@ impl HttpProxy {
         let reveiver = &mut self.channel;
 
         let listener = TcpListener::bind(addr).await?;
-        info!("Listening on http://{}", addr);
+        info!("Listening on http://{addr}");
         loop {
             tokio::select! {
                Ok((stream,addr))= listener.accept()=>{
@@ -72,7 +72,7 @@ impl HttpProxy {
                         )
                         .await
                     {
-                        error!("Error serving connection: {:?}", err);
+                        error!("Error serving connection: {err:?}");
                     }
                 });
                 },
@@ -113,7 +113,7 @@ impl HttpProxy {
         let reveiver = &mut self.channel;
 
         let listener = TcpListener::bind(addr).await?;
-        info!("Listening on http://{}", addr);
+        info!("Listening on http://{addr}");
         loop {
             tokio::select! {
                     Ok((tcp_stream,addr))= listener.accept()=>{
@@ -138,7 +138,7 @@ impl HttpProxy {
                         proxy_adapter(cloned_port,cloned_shared_config.clone(),client.clone(), req, mapping_key2.clone(), addr)
                     });
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                        error!("Error serving connection: {:?}", err);
+                        error!("Error serving connection: {err:?}");
                     }
                 });
             },
@@ -165,7 +165,7 @@ async fn proxy_adapter(
     match result {
         Ok(res) => Ok(res),
         Err(err) => {
-            error!("The error is {}.", err);
+            error!("The error is {err}.");
             let json_value = json!({
                 "error": err.to_string(),
             });
@@ -210,7 +210,7 @@ async fn proxy_adapter_with_error(
     )
     .await
     .unwrap_or_else(|err| {
-        error!("The error is {}.", err);
+        error!("The error is {err}.");
         let json_value = json!({
             "response_code": -1,
             "response_object": format!("{}", err)
@@ -256,7 +256,7 @@ async fn proxy(
     remote_addr: SocketAddr,
     chain_trait: impl ChainTrait,
 ) -> Result<Response<BoxBody<Bytes, AppError>>, AppError> {
-    debug!("req: {:?}", req);
+    debug!("req: {req:?}");
 
     let inbound_headers = req.headers();
     let uri = req.uri().clone();
@@ -272,11 +272,11 @@ async fn proxy(
             &mut spire_context,
         )
         .await?;
-    debug!("The get_destination is {:?}", handling_result);
+    debug!("The get_destination is {handling_result:?}");
     let handling_result = match handling_result {
         DestinationResult::Matched(hr) => hr,
         DestinationResult::NotAllowed(denial) => {
-            debug!("Request denied: {:?}", denial);
+            debug!("Request denied: {denial:?}");
             let mut response = Response::builder().status(denial.status).body(
                 Full::new(Bytes::from(denial.body))
                     .map_err(AppError::from)
@@ -310,8 +310,7 @@ async fn proxy(
         && inbound_headers.contains_key(SEC_WEBSOCKET_KEY)
     {
         debug!(
-            "The request has been updated to websocket,the req is {:?}!",
-            req
+            "The request has been updated to websocket,the req is {req:?}!"
         );
         return server_upgrade(req, handling_result, client.http).await;
     }
@@ -351,8 +350,7 @@ async fn proxy(
                 Ok(response) => response.map_err(AppError::from),
                 _ => {
                     return Err(AppError(format!(
-                        "Request time out,the uri is {}",
-                        request_path
+                        "Request time out,the uri is {request_path}"
                     )))
                 }
             };
@@ -362,7 +360,7 @@ async fn proxy(
             })
         }
         RouterDestination::Grpc(s) => {
-            info!("The request is grpc!,{}", request_path);
+            info!("The request is grpc!,{request_path}");
             let grpc_client = client
                 .grpc
                 .ok_or(AppError::from(""))?
@@ -386,7 +384,7 @@ async fn proxy(
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(
                     Full::new(Bytes::from(response_json_string))
-                        .map_err(|e| AppError(format!("Failed to create response body: {}", e))) // map_err 的类型是 Infallible，但为保持一致性仍可转换
+                        .map_err(|e| AppError(format!("Failed to create response body: {e}"))) // map_err 的类型是 Infallible，但为保持一致性仍可转换
                         .boxed(),
                 )?;
 
@@ -548,7 +546,7 @@ mod tests {
             CommonCheckRequest {},
         )
         .await;
-        println!("result is {:?}", result);
+        println!("result is {result:?}");
         assert!(result.is_err());
     }
     #[tokio::test]
@@ -591,7 +589,7 @@ mod tests {
             mock_chain_trait,
         )
         .await;
-        println!("result is {:?}", result);
+        println!("result is {result:?}");
         assert!(result.is_ok());
     }
     #[tokio::test]
@@ -650,7 +648,7 @@ mod tests {
             mock_chain_trait,
         )
         .await;
-        println!("result is {:?}", result);
+        println!("result is {result:?}");
         assert!(result.is_err());
     }
     #[tokio::test]
@@ -703,7 +701,7 @@ mod tests {
             mock_chain_trait,
         )
         .await;
-        println!("result is {:?}", result);
+        println!("result is {result:?}");
         assert!(result.is_ok());
     }
     #[tokio::test]

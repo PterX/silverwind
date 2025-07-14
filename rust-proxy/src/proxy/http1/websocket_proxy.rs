@@ -49,7 +49,7 @@ pub async fn server_upgrade(
     check_result: HandlingResult,
     http_client: HttpClients,
 ) -> Result<Response<BoxBody<Bytes, AppError>>, AppError> {
-    debug!("The source request:{:?}.", req);
+    debug!("The source request:{req:?}.");
     let mut res = Response::new(Full::new(Bytes::new()).map_err(AppError::from).boxed());
     if !req.headers().contains_key(UPGRADE) {
         *res.status_mut() = StatusCode::BAD_REQUEST;
@@ -74,7 +74,7 @@ pub async fn server_upgrade(
     header_map.iter().for_each(|(key, value)| {
         new_header.insert(key, value.clone());
     });
-    debug!("The new request is:{:?}", new_request);
+    debug!("The new request is:{new_request:?}");
 
     let request_future = if new_request.uri().to_string().contains("https") {
         http_client.request_https(new_request, DEFAULT_HTTP_TIMEOUT)
@@ -84,8 +84,7 @@ pub async fn server_upgrade(
     let outbound_res = match request_future.await {
         Ok(response) => response.map_err(AppError::from),
         Err(_) => Err(AppError(format!(
-            "Request time out,the uri is {}",
-            request_path
+            "Request time out,the uri is {request_path}"
         ))),
     }?;
     if outbound_res.status() != StatusCode::SWITCHING_PROTOCOLS {
@@ -94,10 +93,10 @@ pub async fn server_upgrade(
     tokio::task::spawn(async move {
         let res = server_upgraded_io(req, outbound_res).await;
         if let Err(err) = res {
-            error!("{}", err);
+            error!("{err}");
         }
     });
-    let web_socket_value = format!("{}258EAFA5-E914-47DA-95CA-C5AB0DC85B11", sec_websocke_key);
+    let web_socket_value = format!("{sec_websocke_key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
     let mut hasher = Sha1::new();
     hasher.update(web_socket_value);
     let result = hasher.finalize();

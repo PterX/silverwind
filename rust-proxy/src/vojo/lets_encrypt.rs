@@ -49,7 +49,7 @@ impl LetsEncryptActions for LetsEntrypt {
             challenge.token.clone(),
             order.key_authorization(challenge).as_str().to_string(),
         )]);
-        info!("challenges: {:?}", challenges);
+        info!("challenges: {challenges:?}");
         let acme_router = acme_router(challenges);
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
@@ -71,18 +71,17 @@ impl LetsEncryptActions for LetsEntrypt {
                 tokio::time::sleep(delay).await;
                 let state = order.refresh().await?;
                 if let OrderStatus::Ready | OrderStatus::Invalid = state.status {
-                    info!("order state: {:#?}", state);
+                    info!("order state: {state:#?}");
                     break;
                 }
 
                 delay *= 2;
                 tries += 1;
                 if tries < 15 {
-                    info!("order is not ready, waiting {delay:?},{:?}{}", state, tries);
+                    info!("order is not ready, waiting {delay:?},{state:?}{tries}");
                 } else {
                     error!(
-                        "timed out before order reached ready state: {state:#?},{}",
-                        tries,
+                        "timed out before order reached ready state: {state:#?},{tries}",
                     );
                     Err(AppError(
                         "timed out before order reached ready state".to_string(),
@@ -98,7 +97,7 @@ impl LetsEncryptActions for LetsEntrypt {
                 )))?;
             }
 
-            info!("challenge completed,{:?}", state);
+            info!("challenge completed,{state:?}");
 
             let mut params = CertificateParams::new(vec![domain.to_owned()])?;
             params.distinguished_name = DistinguishedName::new();
@@ -135,11 +134,11 @@ pub async fn http01_challenge(
     State(challenges): State<HashMap<String, String>>,
     Path(token): Path<String>,
 ) -> Result<String, StatusCode> {
-    info!("received HTTP-01 ACME challenge,{}", token);
+    info!("received HTTP-01 ACME challenge,{token}");
 
     if let Some(key_auth) = challenges.get(&token) {
         Ok({
-            info!("responding to ACME challenge,{}", key_auth);
+            info!("responding to ACME challenge,{key_auth}");
             key_auth.clone()
         })
     } else {
@@ -230,7 +229,7 @@ mod tests {
                 .clone()
                 .oneshot(
                     Request::builder()
-                        .uri(format!("/.well-known/acme-challenge/{}", token))
+                        .uri(format!("/.well-known/acme-challenge/{token}"))
                         .body(axum::body::Body::empty())
                         .unwrap(),
                 )

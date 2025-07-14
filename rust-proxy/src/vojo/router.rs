@@ -66,14 +66,12 @@ impl<'de> Visitor<'de> for StaticFileRouteVisitor {
                     let path = Path::new(&value);
                     if !path.exists() {
                         return Err(serde::de::Error::custom(format!(
-                            "doc_root '{}' does not exist in the file system",
-                            value
+                            "doc_root '{value}' does not exist in the file system"
                         )));
                     }
                     if !path.is_dir() {
                         return Err(serde::de::Error::custom(format!(
-                            "doc_root '{}' is not a directory",
-                            value
+                            "doc_root '{value}' is not a directory"
                         )));
                     }
                     doc_root = Some(value);
@@ -400,7 +398,7 @@ impl HeaderBasedRoute {
 
     fn get_route(&mut self, headers: &HeaderMap<HeaderValue>) -> Result<BaseRoute, AppError> {
         let has_unconfigured = self.routes.iter().any(|r| r.is_alive.is_none());
-        debug!("has_unconfigured:{}", has_unconfigured);
+        debug!("has_unconfigured:{has_unconfigured}");
         let routes = if has_unconfigured {
             self.routes.clone()
         } else {

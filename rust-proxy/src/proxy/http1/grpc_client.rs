@@ -26,21 +26,19 @@ impl GrpcChanel {
         let service_descriptor = self
             .descriptor_pool
             .get_service_by_name(service_name.as_str())
-            .ok_or_else(|| AppError(format!("Service '{}' not found", service_name)))?;
+            .ok_or_else(|| AppError(format!("Service '{service_name}' not found")))?;
 
         let method_descriptor = service_descriptor
             .methods()
-            .into_iter()
             .find(|x| x.name() == method_name)
             .ok_or_else(|| {
                 AppError(format!(
-                    "Method '{}' not found in service '{}'",
-                    method_name, service_name
+                    "Method '{method_name}' not found in service '{service_name}'"
                 ))
             })?;
 
         let request_descriptor = method_descriptor.input();
-        debug!("{:?}", request_descriptor);
+        debug!("{request_descriptor:?}");
         let mut deserializer = serde_json::Deserializer::from_slice(&body);
 
         let dynamic_request = DynamicMessage::deserialize(request_descriptor, &mut deserializer)?;
@@ -76,8 +74,7 @@ impl GrpcClients {
 
             let file_bytes = std::fs::read(&proto_descriptor_set).map_err(|e| {
                 AppError(format!(
-                    "Failed to read .pb file at '{}': {}",
-                    proto_descriptor_set, e,
+                    "Failed to read .pb file at '{proto_descriptor_set}': {e}",
                 ))
             })?;
 
@@ -86,7 +83,7 @@ impl GrpcClients {
                 endpoint_item,
                 GrpcChanel {
                     channel: Grpc::new(channel),
-                    descriptor_pool: descriptor_pool,
+                    descriptor_pool,
                 },
             );
         }
@@ -120,7 +117,7 @@ impl Codec for DynamicCodec {
     type Decoder = DynamicDecoder;
 
     fn encoder(&mut self) -> Self::Encoder {
-        DynamicEncoder::default()
+        DynamicEncoder
     }
 
     fn decoder(&mut self) -> Self::Decoder {

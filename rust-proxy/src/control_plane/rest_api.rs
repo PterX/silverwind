@@ -86,7 +86,7 @@ async fn post_app_config_with_error(
     let app_config = rw_global_lock.clone();
     tokio::spawn(async {
         if let Err(err) = save_config_to_file(app_config).await {
-            error!("Save file error,the error is {}!", err);
+            error!("Save file error,the error is {err}!");
         }
     });
     let data = BaseResponse {
@@ -128,7 +128,7 @@ async fn delete_route_with_error(
     let app_config = rw_global_lock.clone();
     tokio::spawn(async {
         if let Err(err) = save_config_to_file(app_config).await {
-            error!("Save file error,the error is {}!", err);
+            error!("Save file error,the error is {err}!");
         }
     });
 
@@ -166,7 +166,7 @@ async fn put_route_with_error(
     let app_config = rw_global_lock.clone();
     tokio::spawn(async {
         if let Err(err) = save_config_to_file(app_config).await {
-            error!("Save file error,the error is {}!", err);
+            error!("Save file error,the error is {err}!");
         }
     });
     let data = BaseResponse {
@@ -532,7 +532,7 @@ mod tests {
     async fn test_save_config_to_file_success() {
         let app_config = AppConfig::default();
         let res = save_config_to_file(app_config).await;
-        println!("{:?}", res);
+        println!("{res:?}");
         assert!(res.is_ok());
     }
     use crate::control_plane::rest_api::validate_tls_config;

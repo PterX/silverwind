@@ -17,7 +17,7 @@ impl TcpProxy {
     pub async fn start_proxy(&mut self) -> Result<(), AppError> {
         let listen_addr = format!("0.0.0.0:{}", self.port.clone());
         let mapping_key_clone = self.mapping_key.clone();
-        info!("Listening on: {}", listen_addr);
+        info!("Listening on: {listen_addr}");
         let listener = TcpListener::bind(listen_addr).await?;
         let reveiver = &mut self.channel;
         loop {
@@ -29,13 +29,13 @@ impl TcpProxy {
                 if let Ok((mut inbound, socket_addr))=accept_result{
                    let check_res=check(port,cloned_config.clone(),mapping_key_clone.clone(),socket_addr).await?;
                    if !check_res{
-                    info!("The ip[{}] is not allowed!",socket_addr);
+                    info!("The ip[{socket_addr}] is not allowed!");
                     inbound.shutdown().await?;
                     continue;
                    }
                    let transfer = transfer(inbound, mapping_key_clone.clone(),cloned_config.clone(),port).map(|r| {
                         if let Err(e) = r {
-                            error!("Failed to transfer,error is {}", e);
+                            error!("Failed to transfer,error is {e}");
                         }
                     });
                     tokio::spawn(transfer);
@@ -57,7 +57,7 @@ async fn transfer(
     port: i32,
 ) -> Result<(), AppError> {
     let proxy_addr = get_route_cluster(mapping_key, shared_config, port).await?;
-    debug!("proxy_addr:{}", proxy_addr);
+    debug!("proxy_addr:{proxy_addr}");
     let mut outbound = TcpStream::connect(proxy_addr).await?;
 
     let (mut ri, mut wi) = inbound.split();
@@ -91,8 +91,7 @@ async fn check(
         .api_service_config
         .get(&port)
         .ok_or(AppError(format!(
-            "Can not get apiservice from port {}",
-            port
+            "Can not get apiservice from port {port}"
         )))?;
 
     let service_config_clone = api_service;
@@ -114,8 +113,7 @@ async fn get_route_cluster(
         .api_service_config
         .get(&port)
         .ok_or(AppError(format!(
-            "Can not get apiservice from mapping_key {}",
-            mapping_key
+            "Can not get apiservice from mapping_key {mapping_key}"
         )))?;
     let service_config = &value.route_configs.clone();
     let service_config_clone = service_config.clone();
@@ -193,7 +191,7 @@ mod tests {
         assert!(result.unwrap());
 
         let result = check(port, shared_config, "test_key".to_string(), denied_addr).await;
-        println!("{:?}", result);
+        println!("{result:?}");
         assert!(result.is_ok());
     }
 

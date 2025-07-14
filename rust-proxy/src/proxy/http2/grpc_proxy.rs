@@ -57,7 +57,7 @@ pub async fn start_task(
                 )
                 .await;
                 if let Err(err) = result {
-                    error!("Grpc request outbound error,the error is {}", err);
+                    error!("Grpc request outbound error,the error is {err}");
                 }
             });
         }
@@ -88,7 +88,7 @@ pub async fn start_tls_task(
                 )
                 .await;
                 if let Err(err) = result {
-                    error!("Grpc request outbound error,the error is {}", err);
+                    error!("Grpc request outbound error,the error is {err}");
                 }
             });
         }
@@ -118,7 +118,7 @@ impl GrpcProxy {
     pub async fn start_proxy(&mut self) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
-        info!("Listening on grpc://{}", addr);
+        info!("Listening on grpc://{addr}");
         let listener = TcpListener::bind(addr).await?;
         let mapping_key = self.mapping_key.clone();
         let reveiver = &mut self.channel;
@@ -167,7 +167,7 @@ impl GrpcProxy {
         };
         let tls_acceptor = TlsAcceptor::from(tls_cfg);
 
-        info!("Listening on grpc with tls://{}", addr);
+        info!("Listening on grpc with tls://{addr}");
         let listener = TcpListener::bind(addr).await?;
         let mapping_key = self.mapping_key.clone();
         let reveiver = &mut self.channel;
@@ -218,7 +218,7 @@ async fn request_outbound(
     peer_addr: SocketAddr,
     check_trait: impl ChainTrait,
 ) -> Result<(), AppError> {
-    debug!("{:?}", inbount_request);
+    debug!("{inbount_request:?}");
     let (inbound_parts, inbound_body) = inbount_request.into_parts();
 
     let inbound_headers = inbound_parts.headers;
@@ -250,13 +250,13 @@ async fn request_outbound(
     let port = cloned_url
         .port()
         .ok_or(AppError::from("Parse host error!"))?;
-    debug!("The host is {}", host);
+    debug!("The host is {host}");
 
-    let addr = format!("{}:{}", host, port)
+    let addr = format!("{host}:{port}")
         .to_socket_addrs()?
         .next()
         .ok_or(AppError::from("Parse the domain error!"))?;
-    debug!("The addr is {}", addr);
+    debug!("The addr is {addr}");
     let host_str = host.to_string();
 
     let send_request_poll = if request_path.clone().contains("https") {
@@ -270,13 +270,13 @@ async fn request_outbound(
         let tls_connector = TlsConnector::from(Arc::new(config));
         let stream = TcpStream::connect(&addr).await?;
         let domain = rustls_pki_types::ServerName::try_from(host_str.as_str())?.to_owned();
-        debug!("The domain name is {}", host);
+        debug!("The domain name is {host}");
         let stream = tls_connector.connect(domain, stream).await?;
         let (send_request, connection) = client::handshake(stream).await?;
         tokio::spawn(async move {
             let connection_result = connection.await;
             if let Err(err) = connection_result {
-                error!("Cause error in grpc https connection,the error is {}.", err);
+                error!("Cause error in grpc https connection,the error is {err}.");
             } else {
                 debug!("The connection has closed!");
             }
@@ -292,7 +292,7 @@ async fn request_outbound(
         send_request
     };
 
-    debug!("request path is {}", url);
+    debug!("request path is {url}");
     let mut send_request = send_request_poll.ready().await?;
     let request = Request::builder()
         .method(Method::POST)
@@ -301,17 +301,17 @@ async fn request_outbound(
         .header("content-type", "application/grpc")
         .header("te", "trailers")
         .body(())?;
-    debug!("Our bound request is {:?}", request);
+    debug!("Our bound request is {request:?}");
     let (response, outbound_send_stream) = send_request.send_request(request, false)?;
     tokio::spawn(async {
         if let Err(err) = copy_io(outbound_send_stream, inbound_body).await {
-            error!("Copy from inbound to outboud error,the error is {}", err);
+            error!("Copy from inbound to outboud error,the error is {err}");
         }
     });
 
     let (head, outboud_response_body) = response.await?.into_parts();
 
-    debug!("Received response: {:?}", head);
+    debug!("Received response: {head:?}");
 
     let header_map = head.headers.clone();
     let is_grpc_status_ok = header_map
@@ -324,7 +324,7 @@ async fn request_outbound(
 
     tokio::spawn(async {
         if let Err(err) = copy_io(send_stream, outboud_response_body).await {
-            error!("Copy from outbound to inbound error,the error is {}", err);
+            error!("Copy from outbound to inbound error,the error is {err}");
         }
     });
     Ok(())

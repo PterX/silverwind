@@ -273,7 +273,7 @@ impl FixedWindowRateLimit {
         }
         let time_key = get_time_key(self.unit.clone())?;
         let location_key = self.scope.get_key();
-        let key = format!("{}:{}", location_key, time_key);
+        let key = format!("{location_key}:{time_key}");
 
         if self.count_map.len() >= DEFAULT_FIXEDWINDOW_MAP_SIZE as usize {
             if let Some(oldest_key) = self.count_map.keys().next().cloned() {

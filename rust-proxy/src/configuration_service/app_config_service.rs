@@ -18,7 +18,7 @@ pub async fn init(shared_config: SharedConfig) -> Result<(), AppError> {
     for (_, item) in app_config.api_service_config.iter_mut() {
         let port = item.listen_port;
         let server_type = item.server_type.clone();
-        let mapping_key = format!("{}-{}", port, server_type);
+        let mapping_key = format!("{port}-{server_type}");
         let (sender, receiver) = mpsc::channel::<()>(1000);
         item.sender = sender;
         let cloned_config = shared_config.clone();
@@ -36,7 +36,7 @@ pub async fn init(shared_config: SharedConfig) -> Result<(), AppError> {
             )
             .await
             {
-                error!("{}", err);
+                error!("{err}");
             }
         });
     }
@@ -137,7 +137,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await; // Give it time to start
         tx.send(()).await.expect("Failed to send shutdown signal");
         let result = proxy_task.await.expect("Proxy task panicked");
-        assert!(result.is_ok(), "Expected Ok, got {:?}", result);
+        assert!(result.is_ok(), "Expected Ok, got {result:?}");
     }
     #[tokio::test]
     async fn test_start_proxy_https_success() {
@@ -207,9 +207,9 @@ peIJpwo+Kuf964DexDVglw==
         ));
         tokio::time::sleep(Duration::from_millis(10)).await;
         let cc = tx.send(()).await;
-        println!("{:?}", cc);
+        println!("{cc:?}");
         let result = proxy_task.await.expect("Proxy task panicked");
-        assert!(result.is_ok(), "Expected Ok, got {:?}", result);
+        assert!(result.is_ok(), "Expected Ok, got {result:?}");
     }
 
     #[tokio::test]
@@ -251,7 +251,7 @@ peIJpwo+Kuf964DexDVglw==
         tokio::time::sleep(Duration::from_millis(10)).await;
         tx.send(()).await.expect("Failed to send shutdown signal");
         let result = proxy_task.await.expect("Proxy task panicked");
-        assert!(result.is_ok(), "Expected Ok, got {:?}", result);
+        assert!(result.is_ok(), "Expected Ok, got {result:?}");
     }
 
     #[tokio::test]
@@ -271,7 +271,7 @@ peIJpwo+Kuf964DexDVglw==
         tokio::time::sleep(Duration::from_millis(10)).await;
         tx.send(()).await.expect("Failed to send shutdown signal");
         let result = proxy_task.await.expect("Proxy task panicked");
-        assert!(result.is_ok(), "Expected Ok, got {:?}", result);
+        assert!(result.is_ok(), "Expected Ok, got {result:?}");
     }
 
     #[tokio::test]
@@ -290,9 +290,9 @@ peIJpwo+Kuf964DexDVglw==
         ));
         tokio::time::sleep(Duration::from_millis(10)).await;
         let tt = tx.send(()).await;
-        println!("{:?}", tt);
+        println!("{tt:?}");
         let result = proxy_task.await.expect("Proxy task panicked");
-        assert!(result.is_err(), "Expected Ok, got {:?}", result);
+        assert!(result.is_err(), "Expected Ok, got {result:?}");
     }
 
     #[tokio::test]

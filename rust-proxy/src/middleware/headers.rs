@@ -73,7 +73,7 @@ fn parse_duration(s: &str) -> Result<Duration, AppError> {
         "h" => Ok(Duration::from_secs(num * 60 * 60)),
         "d" => Ok(Duration::from_secs(num * 60 * 60 * 24)),
         "w" => Ok(Duration::from_secs(num * 60 * 60 * 24 * 7)),
-        _ => Err(AppError(format!("Unknown time unit '{}'", unit))),
+        _ => Err(AppError(format!("Unknown time unit '{unit}'"))),
     }
 }
 impl StaticResourceHeaders {

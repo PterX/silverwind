@@ -551,7 +551,7 @@ mod tests {
     fn test_app_config_serialize_with_static_config() {
         let app_config = create_default_app_config();
         let json_str = serde_yaml::to_string(&app_config).unwrap();
-        println!("{}", json_str);
+        println!("{json_str}");
     }
     use crate::DEFAULT_ADMIN_PORT;
     #[test]

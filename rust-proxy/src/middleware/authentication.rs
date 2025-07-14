@@ -55,7 +55,7 @@ impl JwtAuth {
                     match decode::<serde_json::Value>(token, &key, &validation) {
                         Ok(_) => return Ok(true),
                         Err(e) => {
-                            error!("JWT validation failed: {}", e);
+                            error!("JWT validation failed: {e}");
                             return Ok(false);
                         }
                     }
@@ -165,7 +165,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             "Authorization",
-            HeaderValue::from_str(&format!("Basic {}", encoded)).unwrap(),
+            HeaderValue::from_str(&format!("Basic {encoded}")).unwrap(),
         );
 
         assert!(auth.check_authentication(&headers).unwrap());
@@ -201,7 +201,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             "Authorization",
-            HeaderValue::from_str(&format!("Basic {}", encoded)).unwrap(),
+            HeaderValue::from_str(&format!("Basic {encoded}")).unwrap(),
         );
 
         assert!(!auth.check_authentication(&headers).unwrap());
@@ -263,7 +263,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             "Authorization",
-            HeaderValue::from_str(&format!("Basic {}", encoded)).unwrap(),
+            HeaderValue::from_str(&format!("Basic {encoded}")).unwrap(),
         );
 
         assert!(auth.check_authentication(&headers).unwrap());
