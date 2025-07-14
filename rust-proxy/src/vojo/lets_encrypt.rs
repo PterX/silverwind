@@ -80,9 +80,7 @@ impl LetsEncryptActions for LetsEntrypt {
                 if tries < 15 {
                     info!("order is not ready, waiting {delay:?},{state:?}{tries}");
                 } else {
-                    error!(
-                        "timed out before order reached ready state: {state:#?},{tries}",
-                    );
+                    error!("timed out before order reached ready state: {state:#?},{tries}",);
                     Err(AppError(
                         "timed out before order reached ready state".to_string(),
                     ))?;
