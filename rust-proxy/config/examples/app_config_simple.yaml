@@ -5,4 +5,5 @@ servers:
     routes:
       - matcher:
           prefix: /
+          prefix_rewrite: /
         forward_to: http://192.168.0.0:9393
