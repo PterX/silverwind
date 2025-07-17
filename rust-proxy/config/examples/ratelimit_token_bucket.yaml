@@ -1,0 +1,19 @@
+log_level: debug
+servers:
+  - listen: 8084
+    protocol: http
+    routes:
+      - matcher:
+          prefix: /
+          prefix_rewrite: /
+        forward_to: http://httpbin.org/
+        middlewares:
+          - kind: rate_limit
+            limiter: token_bucket
+            capacity: 10
+            rate_per_unit: 3
+            unit:
+              kind: Hour
+            scope:
+              kind: IP
+              value: 127.0.0.1
