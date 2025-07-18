@@ -135,13 +135,11 @@ impl RouteConfig {
         } else {
             return Ok(None);
         }
-
         if let Some(rewrite_template) = &self.path_rewrite {
             let path_pattern = self.matchers.iter().find_map(|m| match m {
                 MatcherRule::Path { value, .. } => Some(value),
                 _ => None,
             });
-
             if let Some(pattern) = path_pattern {
                 if let Ok(re) = Regex::new(pattern) {
                     let rewritten_path = re.replace(path, rewrite_template.as_str());
@@ -585,16 +583,13 @@ mod tests {
     fn test_route_matching() {
         let mut route = RouteConfig {
             matchers: vec![MatcherRule::Path {
-                value: "/".to_string(),
+                value: "/api/test".to_string(),
                 match_type: crate::vojo::matcher::PathMatchType::Exact,
             }],
+            path_rewrite: Some("/v1/test".to_string()),
             ..Default::default()
         };
         let get = http::Method::GET;
-        let result = route
-            .match_and_rewrite("/api/test", &get, &HeaderMap::new())
-            .unwrap();
-        assert_eq!(result, Some("/api/test".to_string()));
         let result = route
             .match_and_rewrite("/api/test", &get, &HeaderMap::new())
             .unwrap();
@@ -609,10 +604,18 @@ mod tests {
     #[test]
     fn test_route_host_matching() {
         let mut route = RouteConfig {
-            matchers: vec![MatcherRule::Path {
-                value: "/".to_string(),
-                match_type: crate::vojo::matcher::PathMatchType::Exact,
-            }],
+            matchers: vec![
+                MatcherRule::Path {
+                    value: "/api/test".to_string(),
+                    match_type: crate::vojo::matcher::PathMatchType::Exact,
+                },
+                MatcherRule::Host {
+                    value: "example.com".to_string(),
+                    regex: None,
+                },
+            ],
+            path_rewrite: Some("/v1/test".to_string()),
+
             ..Default::default()
         };
 

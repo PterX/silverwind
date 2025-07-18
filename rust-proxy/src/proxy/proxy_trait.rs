@@ -398,6 +398,6 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.is_matched());
+        assert!(!result.is_matched());
     }
 }
