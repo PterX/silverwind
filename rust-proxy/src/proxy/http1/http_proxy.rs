@@ -259,12 +259,14 @@ async fn proxy(
     debug!("req: {req:?}");
 
     let inbound_headers = req.headers();
+    let method = req.method();
     let uri = req.uri().clone();
     let mut spire_context = SpireContext::new(port, None);
     let handling_result = chain_trait
         .get_destination(
             shared_config.clone(),
             port,
+            method,
             mapping_key.clone(),
             inbound_headers,
             uri,
@@ -309,9 +311,7 @@ async fn proxy(
     if inbound_headers.clone().contains_key(CONNECTION)
         && inbound_headers.contains_key(SEC_WEBSOCKET_KEY)
     {
-        debug!(
-            "The request has been updated to websocket,the req is {req:?}!"
-        );
+        debug!("The request has been updated to websocket,the req is {req:?}!");
         return server_upgrade(req, handling_result, client.http).await;
     }
 
@@ -426,7 +426,7 @@ mod tests {
     use crate::middleware::authentication::BasicAuth;
     use crate::middleware::middlewares::MiddleWares;
     use crate::proxy::proxy_trait::{HandlingResult, MockChainTrait};
-    use crate::vojo::app_config::Matcher;
+    
     use crate::vojo::app_config::{ApiService, RouteConfig};
     use crate::vojo::router::{BaseRoute, RandomRoute, Router};
     use crate::{vojo::router::StaticFileRoute, AppConfig};
@@ -512,10 +512,10 @@ mod tests {
                                     ..Default::default()
                                 }],
                             }),
-                            matcher: Some(Matcher {
-                                prefix: "/".to_string(),
-                                prefix_rewrite: "/".to_string(),
-                            }),
+                            matchers: vec![MatcherRule::Path {
+                                value: "/".to_string(),
+                                match_type: crate::vojo::matcher::PathMatchType::Exact,
+                            }],
 
                             ..Default::default()
                         }],
@@ -576,7 +576,7 @@ mod tests {
         let mut mock_chain_trait = MockChainTrait::new();
         mock_chain_trait
             .expect_get_destination()
-            .returning(|_, _, _, _, _, _, _| {
+            .returning(|_, _, _, _, _, _, _, _| {
                 Ok(crate::proxy::proxy_trait::DestinationResult::NoMatchFound)
             });
         let result = proxy(
@@ -617,9 +617,8 @@ mod tests {
         req.headers_mut().extend(headers);
 
         let mut mock_chain_trait = MockChainTrait::new();
-        mock_chain_trait
-            .expect_get_destination()
-            .returning(|_, _, _, _, _, _, spire_context| {
+        mock_chain_trait.expect_get_destination().returning(
+            |_, _, _, _, _, _, _, spire_context| {
                 spire_context.middlewares = Some(vec![MiddleWares::Authentication(
                     crate::middleware::authentication::Authentication::Basic(BasicAuth {
                         credentials: "user:pass".to_string(),
@@ -634,7 +633,8 @@ mod tests {
                         }),
                     },
                 ))
-            });
+            },
+        );
         mock_chain_trait
             .expect_handle_before_request()
             .returning(|_, _, _| Err(AppError("test".to_string())));
@@ -678,7 +678,7 @@ mod tests {
         let mut mock_chain_trait = MockChainTrait::new();
         mock_chain_trait
             .expect_get_destination()
-            .returning(|_, _, _, _, _, _, _| {
+            .returning(|_, _, _, _, _, _, _, _| {
                 Ok(crate::proxy::proxy_trait::DestinationResult::Matched(
                     HandlingResult {
                         request_path: "/test".to_string(),

@@ -222,12 +222,14 @@ async fn request_outbound(
     let (inbound_parts, inbound_body) = inbount_request.into_parts();
 
     let inbound_headers = inbound_parts.headers;
+    let method = inbound_parts.method;
     let uri = inbound_parts.uri.clone();
     let mut spire_context = SpireContext::new(port, None);
     let check_result = check_trait
         .get_destination(
             shared_config,
             port,
+            &method,
             mapping_key.clone(),
             &inbound_headers,
             uri,

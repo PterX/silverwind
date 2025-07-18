@@ -5,16 +5,19 @@ use crate::utils::uuid::get_uuid;
 use crate::vojo::anomaly_detection::AnomalyDetectionType;
 use crate::vojo::app_error::AppError;
 use crate::vojo::health_check::HealthCheckType;
+use crate::vojo::matcher::MatcherRule;
 use crate::vojo::router::deserialize_router;
 use crate::vojo::router::Router;
 use crate::DEFAULT_ADMIN_PORT;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::Method;
 use regex::Regex;
 use serde::Deserializer;
 use serde::Serializer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
@@ -88,10 +91,11 @@ pub struct Transcode {
 pub struct RouteConfig {
     #[serde(skip_serializing_if = "is_empty", default = "default_route_id")]
     pub route_id: String,
+
+    #[serde(default)]
+    pub matchers: Vec<MatcherRule>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub matcher: Option<Matcher>,
+    pub path_rewrite: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcode: Option<Transcode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -108,6 +112,8 @@ pub struct RouteConfig {
     pub router: Router,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub middlewares: Option<Vec<MiddleWares>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub methods: Option<HashSet<String>>,
 }
 
 fn default_route_id() -> String {
@@ -115,45 +121,58 @@ fn default_route_id() -> String {
 }
 
 impl RouteConfig {
-    pub fn is_matched(
+    pub fn match_and_rewrite(
         &mut self,
         path: &str,
-        headers_option: Option<&HeaderMap<HeaderValue>>,
+        method: &Method,
+        headers: &HeaderMap<HeaderValue>,
     ) -> Result<Option<String>, AppError> {
-        let matcher = self
-            .matcher
-            .as_mut()
-            .ok_or("The matcher counld not be none for http")?;
-
-        let match_res = path.strip_prefix(matcher.prefix.as_str());
-        if match_res.is_none() {
+        if self
+            .matchers
+            .iter_mut()
+            .all(|rule| rule.matches(method, path, headers))
+        {
+        } else {
             return Ok(None);
         }
-        let final_path = [
-            matcher.prefix_rewrite.as_str(),
-            match_res.ok_or("match_res is none")?,
-        ]
-        .join("");
-        // info!("final_path:{}", final_path);
-        if let Some(real_host_name) = &self.host_name {
-            if headers_option.is_none() {
-                return Ok(None);
+
+        if let Some(rewrite_template) = &self.path_rewrite {
+            let path_pattern = self.matchers.iter().find_map(|m| match m {
+                MatcherRule::Path { value, .. } => Some(value),
+                _ => None,
+            });
+
+            if let Some(pattern) = path_pattern {
+                if let Ok(re) = Regex::new(pattern) {
+                    let rewritten_path = re.replace(path, rewrite_template.as_str());
+                    return Ok(Some(rewritten_path.into_owned()));
+                }
+
+                if let Some(stripped_path) = path.strip_prefix(pattern) {
+                    return Ok(Some(format!("{rewrite_template}{stripped_path}")));
+                }
             }
-            let header_map = headers_option.ok_or("headers_option is none")?;
-            let host_option = header_map.get("Host");
-            if host_option.is_none() {
-                return Ok(None);
-            }
-            let host_result = host_option.ok_or("host_option is none")?.to_str();
-            if host_result.is_err() {
-                return Ok(None);
-            }
-            let host_name_regex = Regex::new(real_host_name.as_str())?;
-            return host_name_regex
-                .captures(host_result?)
-                .map_or(Ok(None), |_| Ok(Some(final_path)));
+
+            Ok(Some(path.to_string()))
+        } else {
+            Ok(Some(path.to_string()))
         }
-        Ok(Some(final_path))
+    }
+    pub fn rewrite_path(&self, path: &str) -> Option<String> {
+        if let Some(rewrite_template) = &self.path_rewrite {
+            let path_rule = self.matchers.iter().find_map(|m| match m {
+                MatcherRule::Path { value, .. } => Some(value),
+                _ => None,
+            });
+
+            if let Some(prefix_to_replace) = path_rule {
+                if let Some(stripped_path) = path.strip_prefix(prefix_to_replace) {
+                    return Some(format!("{rewrite_template}{stripped_path}"));
+                }
+            }
+        }
+
+        None
     }
     pub fn is_allowed(
         &mut self,
@@ -477,10 +496,10 @@ mod tests {
         };
         let route = RouteConfig {
             route_id: "test_route".to_string(),
-            matcher: Some(Matcher {
-                prefix: "/".to_string(),
-                prefix_rewrite: "/".to_string(),
-            }),
+            matchers: vec![MatcherRule::Path {
+                value: "/".to_string(),
+                match_type: crate::vojo::matcher::PathMatchType::Exact,
+            }],
             router: Router::WeightBased(header_based),
 
             health_check: Some(HealthCheckType::HttpGet(HttpHealthCheckParam {
@@ -565,39 +584,50 @@ mod tests {
     #[test]
     fn test_route_matching() {
         let mut route = RouteConfig {
-            matcher: Some(Matcher {
-                prefix: "/api".to_string(),
-                prefix_rewrite: "/v1".to_string(),
-            }),
+            matchers: vec![MatcherRule::Path {
+                value: "/".to_string(),
+                match_type: crate::vojo::matcher::PathMatchType::Exact,
+            }],
             ..Default::default()
         };
-
-        let result = route.is_matched("/api/test", None).unwrap();
+        let get = http::Method::GET;
+        let result = route
+            .match_and_rewrite("/api/test", &get, &HeaderMap::new())
+            .unwrap();
+        assert_eq!(result, Some("/api/test".to_string()));
+        let result = route
+            .match_and_rewrite("/api/test", &get, &HeaderMap::new())
+            .unwrap();
         assert_eq!(result, Some("/v1/test".to_string()));
 
-        let result = route.is_matched("/other/test", None).unwrap();
+        let result = route
+            .match_and_rewrite("/other/test", &get, &HeaderMap::new())
+            .unwrap();
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_route_host_matching() {
         let mut route = RouteConfig {
-            host_name: Some("example.com".to_string()),
-            matcher: Some(Matcher {
-                prefix: "/api".to_string(),
-                prefix_rewrite: "/v1".to_string(),
-            }),
+            matchers: vec![MatcherRule::Path {
+                value: "/".to_string(),
+                match_type: crate::vojo::matcher::PathMatchType::Exact,
+            }],
             ..Default::default()
         };
 
         let mut headers = HeaderMap::new();
         headers.insert("Host", HeaderValue::from_static("example.com"));
 
-        let result = route.is_matched("/api/test", Some(&headers)).unwrap();
+        let result = route
+            .match_and_rewrite("/api/test", &http::Method::GET, &headers)
+            .unwrap();
         assert_eq!(result, Some("/v1/test".to_string()));
 
         headers.insert("Host", HeaderValue::from_static("wrong.com"));
-        let result = route.is_matched("/api/test", Some(&headers)).unwrap();
+        let result = route
+            .match_and_rewrite("/api/test", &http::Method::GET, &headers)
+            .unwrap();
         assert_eq!(result, None);
     }
 

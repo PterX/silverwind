@@ -10,6 +10,7 @@ use bytes::Bytes;
 use http::header;
 use http::header::HeaderMap;
 use http::HeaderValue;
+use http::Method;
 use http::Request;
 use http::StatusCode;
 use http_body_util::combinators::BoxBody;
@@ -111,6 +112,7 @@ impl ChainTrait for CommonCheckRequest {
         &self,
         shared_config: SharedConfig,
         port: i32,
+        method: &Method,
         _mapping_key: String,
         headers: &HeaderMap,
         uri: Uri,
@@ -130,7 +132,7 @@ impl ChainTrait for CommonCheckRequest {
             ))?;
         debug!("api_service_config: {api_service:?}");
         for item in api_service.route_configs.iter_mut() {
-            let match_result = item.is_matched(backend_path, Some(headers))?;
+            let match_result = item.match_and_rewrite(backend_path, method, headers)?;
             if match_result.is_none() {
                 continue;
             }
@@ -233,6 +235,7 @@ pub trait ChainTrait {
         &self,
         shared_config: SharedConfig,
         port: i32,
+        method: &Method,
         mapping_key: String,
         headers: &HeaderMap,
         uri: Uri,
@@ -311,6 +314,7 @@ mod tests {
             .get_destination(
                 shared_config,
                 8080,
+                &http::Method::GET,
                 "test".into(),
                 &headers,
                 uri,
@@ -352,6 +356,7 @@ mod tests {
             .get_destination(
                 shared_config,
                 8080,
+                &http::Method::GET,
                 "test".into(),
                 &headers,
                 uri,
@@ -383,6 +388,7 @@ mod tests {
             .get_destination(
                 shared_config,
                 8080,
+                &http::Method::GET,
                 "test".into(),
                 &headers,
                 uri,

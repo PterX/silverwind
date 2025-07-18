@@ -21,6 +21,7 @@ mod monitor;
 mod proxy;
 use tracing_subscriber::{filter, Registry};
 mod utils;
+use crate::vojo::cli::Commands;
 use tracing_subscriber::filter::LevelFilter;
 
 mod vojo;
@@ -37,18 +38,44 @@ async fn main() -> Result<(), AppError> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
-    if let Err(e) = run_app(reload_handle).await {
-        error!("Application failed to start:   {e:?}");
-        return Err(e);
+    let cli = Cli::parse();
+    info!("CLI arguments parsed: {cli:?}");
+
+    match cli.command {
+        Some(command) => match command {
+            Commands::Convert(args) => {
+                info!("检测到 'convert' 命令，开始转换...");
+                if let Err(e) = handle_convert_command(args).await {
+                    error!("转换 OpenAPI 文件失败: {e:?}");
+                    return Err(e);
+                }
+                info!("转换成功！");
+            }
+        },
+        None => {
+            info!("未指定子命令，启动 Spire 网关...");
+
+            if let Err(e) = run_app(cli, reload_handle).await {
+                error!("应用启动失败: {e:?}");
+                return Err(e);
+            }
+        }
     }
 
     Ok(())
 }
+async fn handle_convert_command(args: crate::vojo::cli::ConvertArgs) -> Result<(), AppError> {
+    let yaml = std::fs::read_to_string(args.input_file)?;
 
-async fn run_app(reload_handle: Handle<filter::Targets, Registry>) -> Result<(), AppError> {
-    let cli = Cli::parse();
-    info!("CLI arguments parsed: {cli:?}");
+    let spec = oas3::from_yaml(yaml)?;
 
+    Ok(())
+}
+
+async fn run_app(
+    cli: Cli,
+    reload_handle: Handle<filter::Targets, Registry>,
+) -> Result<(), AppError> {
     let config = load_config(&cli).await?;
     info!("Configuration loaded successfully.");
     println!("Full configuration: {config:?}");
@@ -111,6 +138,7 @@ mod tests {
     async fn test_start_with_config_file_integration() {
         let cli = Cli {
             config_path: "conf/app_config.yaml".to_string(),
+            command: None,
         };
 
         let config_result = load_config(&cli).await;

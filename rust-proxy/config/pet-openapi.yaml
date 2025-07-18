@@ -1,0 +1,236 @@
+# OpenAPI 规范版本
+openapi: 3.0.0
+
+# API 的元数据信息
+info:
+  title: User Service API
+  description: 一个简单的API，用于管理系统中的用户。可以被导入到Kong网关。
+  version: "1.0.0"
+  contact:
+    name: API Support
+    url: http://www.example.com/support
+    email: support@example.com
+
+# 定义API服务器的地址，Kong会用它来作为后端服务的地址
+servers:
+  - url: http://user-service.internal:8080
+    description: 内部用户服务
+
+# 定义API的安全方案
+security:
+  - ApiKeyAuth: [] # 全局应用ApiKeyAuth安全方案
+
+# API路径和操作的定义
+paths:
+  /users:
+    get:
+      summary: 获取用户列表
+      description: 返回所有用户的分页列表。
+      operationId: listUsers
+      tags:
+        - Users
+      parameters:
+        - name: limit
+          in: query
+          description: 每页返回的用户数量
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 20
+      responses:
+        "200":
+          description: 成功的用户列表响应
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "400":
+          description: 无效的请求参数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      summary: 创建一个新用户
+      description: 将新用户添加到系统中。
+      operationId: createUser
+      tags:
+        - Users
+      requestBody:
+        description: 要创建的用户对象
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewUser"
+      responses:
+        "201":
+          description: 用户创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: 无效的输入
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /users/{userId}:
+    get:
+      summary: 根据ID查找用户
+      description: 返回单个用户的详细信息。
+      operationId: getUserById
+      tags:
+        - Users
+      parameters:
+        - name: userId
+          in: path
+          description: 要获取的用户的ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 成功的用户响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: 未找到用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    put:
+      summary: 更新一个现有用户
+      description: 根据用户ID更新用户信息。
+      operationId: updateUser
+      tags:
+        - Users
+      parameters:
+        - name: userId
+          in: path
+          description: 要更新的用户的ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        description: 需要更新的用户数据
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewUser" # 更新时可以复用创建用户的模型
+      responses:
+        "200":
+          description: 用户更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: 未找到用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      summary: 删除一个用户
+      description: 根据用户ID从系统中删除一个用户。
+      operationId: deleteUser
+      tags:
+        - Users
+      parameters:
+        - name: userId
+          in: path
+          description: 要删除的用户的ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 用户删除成功，无返回内容
+        "404":
+          description: 未找到用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+# 可重用的组件
+components:
+  schemas:
+    # 用于创建新用户或更新用户的数据模型
+    NewUser:
+      type: object
+      properties:
+        username:
+          type: string
+          description: 用户的唯一名称
+          example: john_doe
+        email:
+          type: string
+          format: email
+          description: 用户的电子邮件地址
+          example: john.doe@example.com
+        fullName:
+          type: string
+          description: 用户的全名
+          example: John Doe
+      required:
+        - username
+        - email
+
+    # 包含ID和创建时间的用户数据模型
+    User:
+      allOf:
+        - $ref: "#/components/schemas/NewUser"
+        - type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: 用户的唯一标识符
+              example: "a7a4f7f0-3c3d-4c3d-9c3d-3c3d3c3d3c3d"
+            createdAt:
+              type: string
+              format: date-time
+              description: 用户的创建时间戳
+              example: "2023-10-27T10:00:00Z"
+          required:
+            - id
+            - createdAt
+
+    # 标准错误响应模型
+    Error:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+          description: 错误代码
+        message:
+          type: string
+          description: 错误的详细信息
+      required:
+        - code
+        - message
+
+  # 安全方案定义
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header # API Key在请求头中传递
+      name: X-API-Key # 请求头的名称

@@ -6,4 +6,5 @@ pub mod base_response;
 pub mod cli;
 pub mod health_check;
 pub mod lets_encrypt;
+pub mod matcher;
 pub mod router;
