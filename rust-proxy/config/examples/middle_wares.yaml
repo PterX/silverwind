@@ -3,9 +3,9 @@ servers:
     protocol: http
     routes:
       - route_id: test_route
-        matcher:
-          prefix: /
-          prefix_rewrite: /
+        matchers:
+          - kind: path
+            value: /api/v1
         liveness_config:
           min_liveness_count: 1
         health_check:

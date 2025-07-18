@@ -4,9 +4,9 @@ servers:
     protocol: http
     routes:
       - route_id: test_route
-        matcher:
-          prefix: /
-          prefix_rewrite: /
+        matchers:
+          - kind: path
+            value: /api/v1
         forward_to: http://127.0.0.1:8090
         middlewares:
           - kind: forward_headers

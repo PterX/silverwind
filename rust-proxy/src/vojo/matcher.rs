@@ -3,8 +3,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum PathMatchType {
     #[serde(rename = "prefix")]
     #[default]
@@ -14,19 +13,22 @@ pub enum PathMatchType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")] // 使 YAML/JSON 配置更友好 (e.g., path_match, header_match)
+#[serde(tag = "kind", rename_all = "PascalCase")]
 pub enum MatcherRule {
+    #[serde(rename = "path")]
     Path {
         value: String,
-        #[serde(default)] // 默认为前缀匹配
+        #[serde(default)]
         match_type: PathMatchType,
     },
+    #[serde(rename = "host")]
     Host {
         value: String,
-        #[serde(skip)] // Regex 不支持序列化，每次使用时编译
+        #[serde(skip)]
         #[serde(default)]
         regex: Option<Regex>,
     },
+    #[serde(rename = "header")]
     Header {
         name: String,
         value: String,
@@ -109,4 +111,3 @@ impl MatcherRule {
         }
     }
 }
-

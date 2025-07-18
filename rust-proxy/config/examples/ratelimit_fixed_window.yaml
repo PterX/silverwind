@@ -3,9 +3,9 @@ servers:
   - listen: 8084
     protocol: http
     routes:
-      - matcher:
-          prefix: /
-          prefix_rewrite: /
+      - matchers:
+          - kind: path
+            value: /api/v1
         forward_to: http://httpbin.org/
         middlewares:
           - kind: rate_limit

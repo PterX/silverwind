@@ -3,9 +3,7 @@ servers:
   - listen: 4486
     protocol: http
     routes:
-      - matcher:
-          prefix: /
-          prefix_rewrite: /
+      - matchers: ss
         forward_to:
           kind: random
           targets:

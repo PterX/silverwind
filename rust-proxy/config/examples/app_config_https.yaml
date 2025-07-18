@@ -54,17 +54,17 @@ servers:
       peIJpwo+Kuf964DexDVglw==
       -----END PRIVATE KEY-----
     routes:
-      - matcher:
-          prefix: /api/v1
-          prefix_rewrite: /
+      - matchers:
+          - kind: path
+            value: /api/v1
         forward_to:
           kind: random
           targets:
             - endpoint: http://192.168.0.1:8888/
             - endpoint: http://192.168.0.2:9987/
-      - matcher:
-          prefix: /api/v2
-          prefix_rewrite: /
+      - matchers:
+          - kind: path
+            value: /api/v1
         forward_to:
           kind: random
           targets:

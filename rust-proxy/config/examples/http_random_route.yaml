@@ -3,9 +3,9 @@ servers:
   - listen: 8084
     protocol: http
     routes:
-      - matcher:
-          prefix: /
-          prefix_rewrite: /
+      - matchers:
+          - kind: path
+            value: /api/v1
         forward_to:
           - http://192.168.0.0:9393
           - http://192.168.0.0:9394
