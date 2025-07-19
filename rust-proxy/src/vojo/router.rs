@@ -397,6 +397,9 @@ impl HeaderBasedRoute {
     }
 
     fn get_route(&mut self, headers: &HeaderMap<HeaderValue>) -> Result<BaseRoute, AppError> {
+        if self.routes.is_empty() {
+            return Err(AppError("No routes available".to_string()));
+        }
         let has_unconfigured = self.routes.iter().any(|r| r.is_alive.is_none());
         debug!("has_unconfigured:{has_unconfigured}");
         let routes = if has_unconfigured {
@@ -500,6 +503,9 @@ impl RandomRoute {
     }
 
     fn get_route(&mut self, _headers: &HeaderMap<HeaderValue>) -> Result<BaseRoute, AppError> {
+        if self.routes.is_empty() {
+            return Err(AppError("No routes available".to_string()));
+        }
         let has_unconfigured = self.routes.iter().any(|r| r.is_alive.is_none());
 
         if has_unconfigured {
@@ -554,6 +560,9 @@ impl PollRoute {
     }
 
     fn get_route(&mut self, _headers: &HeaderMap<HeaderValue>) -> Result<BaseRoute, AppError> {
+        if self.routes.is_empty() {
+            return Err(AppError("No routes available".to_string()));
+        }
         let has_unconfigured = self.routes.iter().any(|r| r.is_alive.is_none());
         if has_unconfigured {
             self.current_index += 1;

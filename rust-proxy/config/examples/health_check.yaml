@@ -3,7 +3,9 @@ servers:
   - listen: 4486
     protocol: http
     routes:
-      - matchers: ss
+      - matchers: 
+          - kind: path
+            value: /api/v1
         forward_to:
           kind: random
           targets:
