@@ -8,6 +8,7 @@ use crate::vojo::health_check::HealthCheckType;
 use crate::vojo::matcher::MatcherRule;
 use crate::vojo::router::deserialize_router;
 use crate::vojo::router::Router;
+use crate::vojo::timeout_config::TimeoutConfig;
 use crate::DEFAULT_ADMIN_PORT;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -17,7 +18,6 @@ use serde::Deserializer;
 use serde::Serializer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
@@ -113,7 +113,7 @@ pub struct RouteConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub middlewares: Option<Vec<MiddleWares>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub methods: Option<HashSet<String>>,
+    pub timeout: Option<TimeoutConfig>,
 }
 
 fn default_route_id() -> String {

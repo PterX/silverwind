@@ -8,3 +8,4 @@ pub mod health_check;
 pub mod lets_encrypt;
 pub mod matcher;
 pub mod router;
+pub mod timeout_config;

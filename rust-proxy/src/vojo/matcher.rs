@@ -36,9 +36,8 @@ pub enum MatcherRule {
         #[serde(default)]
         regex: Option<Regex>,
     },
-    Method {
-        values: HashSet<String>,
-    },
+    #[serde(rename = "method")]
+    Method { values: HashSet<String> },
 }
 impl PartialEq for MatcherRule {
     fn eq(&self, other: &Self) -> bool {
@@ -80,17 +79,65 @@ impl MatcherRule {
                 ref value,
                 match_type,
             } => match match_type {
-                PathMatchType::Prefix => path.starts_with(value),
-                PathMatchType::Exact => path == value,
+                PathMatchType::Prefix => {
+                    if path.starts_with(value) {
+                        true
+                    } else {
+                        debug!(
+                            "Path matching failed: path '{path}' does not start with prefix '{value}'"
+                        );
+                        false
+                    }
+                }
+                PathMatchType::Exact => {
+                    if path == value.as_str() {
+                        true
+                    } else {
+                        debug!(
+                            "Path matching failed: path '{path}' does not exactly match '{value}'"
+                        );
+                        false
+                    }
+                }
             },
-            MatcherRule::Method { values } => values.contains(method.as_str()),
+            MatcherRule::Method { values } => {
+                if values.contains(&method.as_str().to_string()) {
+                    true
+                } else {
+                    debug!(
+                        "Method matching failed: method '{method}' is not in the allowed list '{values:?}'"
+                    );
+                    false
+                }
+            }
             MatcherRule::Host { value, regex } => {
                 if regex.is_none() {
                     *regex = Regex::new(value).ok();
                 }
                 if let (Some(host_header), Some(re)) = (headers.get("Host"), regex.as_ref()) {
-                    host_header.to_str().is_ok_and(|h| re.is_match(h))
+                    match host_header.to_str() {
+                        Ok(h) => {
+                            if re.is_match(h) {
+                                true
+                            } else {
+                                debug!(
+                                    "Host matching failed: host '{h}' does not match regex '{value}'"
+                                );
+                                false
+                            }
+                        }
+                        Err(_) => {
+                            debug!("Host matching failed: 'Host' header contains non-visible ASCII characters");
+                            false
+                        }
+                    }
                 } else {
+                    if headers.get("Host").is_none() {
+                        debug!("Host matching failed: 'Host' header not found");
+                    }
+                    if regex.is_none() {
+                        debug!("Host matching failed: invalid regex pattern '{value}'");
+                    }
                     false
                 }
             }
@@ -102,9 +149,35 @@ impl MatcherRule {
                 if regex.is_none() {
                     *regex = Regex::new(value).ok();
                 }
-                if let (Some(header_value), Some(re)) = (headers.get(name), regex.as_ref()) {
-                    header_value.to_str().is_ok_and(|h| re.is_match(h))
+                if let (Some(header_value), Some(re)) = (headers.get(name.as_str()), regex.as_ref())
+                {
+                    match header_value.to_str() {
+                        Ok(h) => {
+                            if re.is_match(h) {
+                                true
+                            } else {
+                                debug!(
+                                    "Header matching failed: header '{name}' with value '{h}' does not match regex '{value}'"
+                                );
+                                false
+                            }
+                        }
+                        Err(_) => {
+                            debug!(
+                                "Header matching failed: header '{name}' contains non-visible ASCII characters"
+                            );
+                            false
+                        }
+                    }
                 } else {
+                    if headers.get(name.as_str()).is_none() {
+                        debug!("Header matching failed: header '{name}' not found");
+                    }
+                    if regex.is_none() {
+                        debug!(
+                            "Header matching failed: invalid regex pattern '{value}' for header '{name}'"
+                        );
+                    }
                     false
                 }
             }

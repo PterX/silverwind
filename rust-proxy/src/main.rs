@@ -44,19 +44,19 @@ async fn main() -> Result<(), AppError> {
     match cli.command {
         Some(command) => match command {
             Commands::Convert(args) => {
-                info!("检测到 'convert' 命令，开始转换...");
+                info!("'convert' command detected, starting conversion...");
                 if let Err(e) = handle_convert_command(args).await {
-                    error!("转换 OpenAPI 文件失败: {e:?}");
+                    error!("Failed to convert OpenAPI file: {e:?}");
                     return Err(e);
                 }
-                info!("转换成功！");
+                info!("Conversion successful!");
             }
         },
         None => {
-            info!("未指定子命令，启动 Spire 网关...");
+            info!("No subcommand specified, starting Spire gateway...");
 
             if let Err(e) = run_app(cli, reload_handle).await {
-                error!("应用启动失败: {e:?}");
+                error!("Application failed to start: {e:?}");
                 return Err(e);
             }
         }

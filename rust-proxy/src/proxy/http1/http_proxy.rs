@@ -1,4 +1,3 @@
-use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::proxy::http1::app_clients::AppClients;
 use crate::proxy::proxy_trait::DestinationResult;
@@ -341,10 +340,11 @@ async fn proxy(
                         .await?;
                 }
             }
+            let timeout = check_request.timeout;
             let request_future = if request_path.contains("https") {
-                client.http.request_https(req, DEFAULT_HTTP_TIMEOUT)
+                client.http.request_https(req, timeout)
             } else {
-                client.http.request_http(req, DEFAULT_HTTP_TIMEOUT)
+                client.http.request_http(req, timeout)
             };
             let response_result = match request_future.await {
                 Ok(response) => response.map_err(AppError::from),
@@ -630,6 +630,7 @@ mod tests {
                         router_destination: RouterDestination::File(StaticFileRoute {
                             doc_root: "./test".to_string(),
                         }),
+                        timeout: 1000,
                     },
                 ))
             },
@@ -687,6 +688,7 @@ mod tests {
                         router_destination: RouterDestination::File(StaticFileRoute {
                             doc_root: "./test".to_string(),
                         }),
+                        timeout: 1000,
                     },
                 ))
             });

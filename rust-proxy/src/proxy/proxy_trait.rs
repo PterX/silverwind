@@ -1,3 +1,4 @@
+use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
 use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::middlewares::Denial;
 use crate::middleware::middlewares::MiddleWares;
@@ -5,6 +6,7 @@ use crate::middleware::middlewares::Middleware;
 use crate::vojo::app_error::AppError;
 use crate::vojo::router::BaseRoute;
 use crate::vojo::router::StaticFileRoute;
+use crate::vojo::timeout_config::TimeoutConfig;
 use crate::SharedConfig;
 use bytes::Bytes;
 use http::header;
@@ -49,6 +51,7 @@ pub struct CommonCheckRequest;
 pub struct HandlingResult {
     pub request_path: String,
     pub router_destination: RouterDestination,
+    pub timeout: u64,
 }
 
 #[derive(Debug)]
@@ -146,7 +149,13 @@ impl ChainTrait for CommonCheckRequest {
             }
             let router_destination = item.router.get_route(headers)?;
             let rest_path = match_result.ok_or("match_result is none")?;
-
+            let timeout = item
+                .timeout
+                .clone()
+                .unwrap_or(TimeoutConfig {
+                    request_timeout: DEFAULT_HTTP_TIMEOUT,
+                })
+                .request_timeout;
             match router_destination {
                 RouterDestination::File(file_route) => {
                     let path = Path::new(&file_route.doc_root);
@@ -155,6 +164,7 @@ impl ChainTrait for CommonCheckRequest {
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path: String::from(request_path.to_str().unwrap_or_default()),
                         router_destination: RouterDestination::File(file_route),
+                        timeout,
                     }));
                 }
                 RouterDestination::Http(base_route) => {
@@ -163,6 +173,7 @@ impl ChainTrait for CommonCheckRequest {
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path,
                         router_destination: RouterDestination::Http(base_route.clone()),
+                        timeout,
                     }));
                 }
                 RouterDestination::Grpc(base_route) => {
@@ -171,6 +182,7 @@ impl ChainTrait for CommonCheckRequest {
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path: rest_path,
                         router_destination: RouterDestination::Grpc(base_route.clone()),
+                        timeout,
                     }));
                 }
             }
