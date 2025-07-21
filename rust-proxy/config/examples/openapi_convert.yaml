@@ -1,0 +1,61 @@
+health_check_log_enabled: false
+admin_port: 8870
+servers:
+  - listen: 8080
+    protocol: http
+    routes:
+      - matchers:
+          - kind: path
+            value: /users
+            match_type: exact
+          - kind: method
+            values:
+              - GET
+        forward_to:
+          kind: random
+          targets:
+            - endpoint: http://user-service.internal:8080
+      - matchers:
+          - kind: path
+            value: /users
+            match_type: exact
+          - kind: method
+            values:
+              - POST
+        forward_to:
+          kind: random
+          targets:
+            - endpoint: http://user-service.internal:8080
+      - matchers:
+          - kind: path
+            value: /users/{userId}
+            match_type: exact
+          - kind: method
+            values:
+              - GET
+        forward_to:
+          kind: random
+          targets:
+            - endpoint: http://user-service.internal:8080
+      - matchers:
+          - kind: path
+            value: /users/{userId}
+            match_type: exact
+          - kind: method
+            values:
+              - PUT
+        forward_to:
+          kind: random
+          targets:
+            - endpoint: http://user-service.internal:8080
+      - matchers:
+          - kind: path
+            value: /users/{userId}
+            match_type: exact
+          - kind: method
+            values:
+              - DELETE
+        forward_to:
+          kind: random
+          targets:
+            - endpoint: http://user-service.internal:8080

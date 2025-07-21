@@ -7,6 +7,7 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 extern crate derive_builder;
+use crate::command::openapi_converter::handle_convert_command;
 use crate::vojo::cli::Cli;
 mod configuration_service;
 mod constants;
@@ -17,6 +18,7 @@ use crate::vojo::cli::SharedConfig;
 mod health_check;
 use crate::constants::common_constants::DEFAULT_ADMIN_PORT;
 use crate::vojo::app_config::AppConfig;
+mod command;
 mod monitor;
 mod proxy;
 use tracing_subscriber::{filter, Registry};
@@ -61,13 +63,6 @@ async fn main() -> Result<(), AppError> {
             }
         }
     }
-
-    Ok(())
-}
-async fn handle_convert_command(args: crate::vojo::cli::ConvertArgs) -> Result<(), AppError> {
-    let yaml = std::fs::read_to_string(args.input_file)?;
-
-    let spec = oas3::from_yaml(yaml)?;
 
     Ok(())
 }
