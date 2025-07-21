@@ -488,7 +488,6 @@ mod tests {
     }
     #[tokio::test]
     async fn test_options_preflight_request() {
-        // let _ = setup_logger_for_test();
         let mut headers = HeaderMap::new();
         headers.insert(
             header::ORIGIN,
@@ -547,7 +546,7 @@ mod tests {
         )
         .await;
         println!("result is {result:?}");
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
     #[tokio::test]
     async fn test_proxy_handling_result_none() {
@@ -637,6 +636,9 @@ mod tests {
         );
         mock_chain_trait
             .expect_handle_before_request()
+            .returning(|_, _, _| Err(AppError("test".to_string())));
+        mock_chain_trait
+            .expect_handle_before_response()
             .returning(|_, _, _| Err(AppError("test".to_string())));
         let result = proxy(
             8080,

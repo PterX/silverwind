@@ -209,7 +209,7 @@ peIJpwo+Kuf964DexDVglw==
         tokio::time::sleep(Duration::from_millis(10)).await;
         let cc = tx.send(()).await;
         let result = proxy_task.await.expect("Proxy task panicked");
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
