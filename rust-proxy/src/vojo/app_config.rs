@@ -23,8 +23,11 @@ use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub health_check_log_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_port: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
     #[serde(
         rename = "servers",
@@ -156,22 +159,7 @@ impl RouteConfig {
             Ok(Some(path.to_string()))
         }
     }
-    pub fn rewrite_path(&self, path: &str) -> Option<String> {
-        if let Some(rewrite_template) = &self.path_rewrite {
-            let path_rule = self.matchers.iter().find_map(|m| match m {
-                MatcherRule::Path { value, .. } => Some(value),
-                _ => None,
-            });
 
-            if let Some(prefix_to_replace) = path_rule {
-                if let Some(stripped_path) = path.strip_prefix(prefix_to_replace) {
-                    return Some(format!("{rewrite_template}{stripped_path}"));
-                }
-            }
-        }
-
-        None
-    }
     pub fn is_allowed(
         &mut self,
         peer_addr: &SocketAddr,
