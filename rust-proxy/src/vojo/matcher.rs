@@ -10,6 +10,8 @@ pub enum PathMatchType {
     Prefix,
     #[serde(rename = "exact")]
     Exact,
+    #[serde(rename = "regex")]
+    Regex,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +22,9 @@ pub enum MatcherRule {
         value: String,
         #[serde(default)]
         match_type: PathMatchType,
+        #[serde(skip)]
+        #[serde(default)]
+        regex: Option<Regex>,
     },
     #[serde(rename = "host")]
     Host {
@@ -46,10 +51,12 @@ impl PartialEq for MatcherRule {
                 Self::Path {
                     value: l_val,
                     match_type: l_mt,
+                    ..
                 },
                 Self::Path {
                     value: r_val,
                     match_type: r_mt,
+                    ..
                 },
             ) => l_val == r_val && l_mt == r_mt,
 
@@ -78,6 +85,7 @@ impl MatcherRule {
             MatcherRule::Path {
                 ref value,
                 match_type,
+                regex,
             } => match match_type {
                 PathMatchType::Prefix => {
                     if path.starts_with(value) {
@@ -96,6 +104,28 @@ impl MatcherRule {
                         debug!(
                             "Path matching failed: path '{path}' does not exactly match '{value}'"
                         );
+                        false
+                    }
+                }
+                PathMatchType::Regex => {
+                    if regex.is_none() {
+                        *regex = Regex::new(value).ok();
+                        if regex.is_none() {
+                            debug!("Path matching failed: invalid regex pattern '{value}'");
+                        }
+                    }
+
+                    if let Some(re) = regex.as_ref() {
+                        if re.is_match(path) {
+                            true
+                        } else {
+                            debug!(
+                                "Path matching failed: path '{path}' does not match regex '{value}'"
+                            );
+                            false
+                        }
+                    } else {
+                        // 如果编译失败，则匹配失败
                         false
                     }
                 }

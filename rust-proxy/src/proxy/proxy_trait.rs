@@ -168,7 +168,7 @@ impl ChainTrait for CommonCheckRequest {
                     }));
                 }
                 RouterDestination::Http(base_route) => {
-                    let request_path = [base_route.endpoint.as_str(), rest_path.as_str()].join("/");
+                    let request_path = [base_route.endpoint.as_str(), rest_path.as_str()].join("");
                     spire_context.middlewares = item.middlewares.clone();
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path,

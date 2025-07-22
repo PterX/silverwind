@@ -1,5 +1,6 @@
 health_check_log_enabled: false
 admin_port: 8870
+log_level: debug
 servers:
   - listen: 8080
     protocol: http
@@ -28,8 +29,8 @@ servers:
             - endpoint: http://user-service.internal:8080
       - matchers:
           - kind: path
-            value: /users/{userId}
-            match_type: exact
+            value: ^/users/[^/]+$
+            match_type: regex
           - kind: method
             values:
               - GET
@@ -39,23 +40,23 @@ servers:
             - endpoint: http://user-service.internal:8080
       - matchers:
           - kind: path
-            value: /users/{userId}
-            match_type: exact
+            value: ^/users/[^/]+$
+            match_type: regex
           - kind: method
             values:
               - PUT
         forward_to:
           kind: random
           targets:
-            - endpoint: http://user-service.internal:8080
+            - endpoint: http://127.0.0.1:8080
       - matchers:
           - kind: path
-            value: /users/{userId}
-            match_type: exact
+            value: ^/users/[^/]+$
+            match_type: regex
           - kind: method
             values:
               - DELETE
         forward_to:
           kind: random
           targets:
-            - endpoint: http://user-service.internal:8080
+            - endpoint: http://127.0.0.1:8081

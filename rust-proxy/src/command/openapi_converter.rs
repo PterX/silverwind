@@ -1,10 +1,9 @@
-// src/command/openapi_converter.rs
-
 use crate::vojo::app_config::{ApiService, AppConfig, RouteConfig};
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::ConvertArgs;
 use crate::vojo::matcher::{MatcherRule, PathMatchType};
 use crate::vojo::router::{BaseRoute, RandomRoute, Router};
+use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use url::Url;
 
@@ -29,9 +28,10 @@ pub async fn handle_convert_command(args: ConvertArgs) -> Result<(), AppError> {
     let paths = spec
         .paths
         .ok_or(AppError("No paths found in the OpenAPI spec".to_string()))?;
+    let re = Regex::new(r"\{[^{}]+\}")?;
     for (path, path_item_ref) in paths.iter() {
         let operation = path_item_ref.methods();
-        for (method, operation) in operation.into_iter() {
+        for (method, _) in operation.into_iter() {
             for server in &servers {
                 let url = Url::parse(server)?;
                 let port = url.port_or_known_default().unwrap_or(80) as i32;
@@ -51,12 +51,18 @@ pub async fn handle_convert_command(args: ConvertArgs) -> Result<(), AppError> {
 
                 let mut methods = HashSet::new();
                 methods.insert(method.as_str().to_string());
-
+                let (path_value, match_type) = if path.contains('{') && path.contains('}') {
+                    let regex_path = format!("^{}$", re.replace_all(path, "[^/]+"));
+                    (regex_path, PathMatchType::Regex)
+                } else {
+                    (path.clone(), PathMatchType::Exact)
+                };
                 let route_config = RouteConfig {
                     matchers: vec![
                         MatcherRule::Path {
-                            value: path.clone(),
-                            match_type: PathMatchType::Exact,
+                            value: path_value,
+                            match_type,
+                            regex: None,
                         },
                         MatcherRule::Method { values: methods },
                     ],

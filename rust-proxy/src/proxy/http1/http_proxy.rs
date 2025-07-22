@@ -514,6 +514,7 @@ mod tests {
                             matchers: vec![MatcherRule::Path {
                                 value: "/".to_string(),
                                 match_type: crate::vojo::matcher::PathMatchType::Exact,
+                                regex: None,
                             }],
 
                             ..Default::default()

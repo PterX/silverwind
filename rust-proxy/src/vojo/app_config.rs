@@ -485,6 +485,7 @@ mod tests {
             matchers: vec![MatcherRule::Path {
                 value: "/".to_string(),
                 match_type: crate::vojo::matcher::PathMatchType::Exact,
+                regex: None,
             }],
             router: Router::WeightBased(header_based),
 
@@ -573,6 +574,7 @@ mod tests {
             matchers: vec![MatcherRule::Path {
                 value: "/api/test".to_string(),
                 match_type: crate::vojo::matcher::PathMatchType::Exact,
+                regex: None,
             }],
             path_rewrite: Some("/v1/test".to_string()),
             ..Default::default()
@@ -596,6 +598,7 @@ mod tests {
                 MatcherRule::Path {
                     value: "/api/test".to_string(),
                     match_type: crate::vojo::matcher::PathMatchType::Exact,
+                    regex: None,
                 },
                 MatcherRule::Host {
                     value: "example.com".to_string(),
