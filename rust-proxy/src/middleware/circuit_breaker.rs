@@ -206,3 +206,191 @@ impl CircuitBreaker {
         format!("{:?}", self.state)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    fn default_breaker() -> CircuitBreaker {
+        CircuitBreaker {
+            failure_rate_threshold: 0.5,
+            consecutive_failure_threshold: 5,
+            open_duration: Duration::from_millis(100),
+            half_open_max_requests: 2,
+            min_requests_for_rate_calculation: 10,
+            state: State::default(),
+        }
+    }
+
+    #[test]
+    fn initial_state_is_closed_and_allows_requests() {
+        let mut cb = default_breaker();
+        assert_eq!(
+            cb.state,
+            State::Closed {
+                failures: 0,
+                total_requests: 0,
+                consecutive_failures: 0,
+            }
+        );
+        assert!(cb.is_call_allowed());
+    }
+
+    #[test]
+    fn trip_on_consecutive_failures() {
+        let mut cb = default_breaker();
+        cb.consecutive_failure_threshold = 3;
+
+        for _ in 0..cb.consecutive_failure_threshold {
+            assert!(cb.is_call_allowed());
+            cb.record_failure();
+        }
+
+        assert!(!matches!(cb.state, State::Closed { .. }));
+        assert!(matches!(cb.state, State::Open { .. }));
+        assert!(!cb.is_call_allowed());
+    }
+
+    #[test]
+    fn trip_on_failure_rate_threshold_corrected() {
+        let mut cb = default_breaker();
+        cb.min_requests_for_rate_calculation = 10;
+        cb.failure_rate_threshold = 0.5; // Trip when failure rate is >= 0.5
+
+        for _ in 0..4 {
+            cb.record_failure();
+        }
+        for _ in 0..5 {
+            cb.record_success();
+        }
+        if let State::Closed {
+            failures,
+            total_requests,
+            ..
+        } = cb.state
+        {
+            assert_eq!(total_requests, 9);
+            assert_eq!(failures, 4);
+        } else {
+            panic!("The circuit breaker should be in the Closed state before the threshold is triggered");
+        }
+        assert!(
+            cb.is_call_allowed(),
+            "Should not trip when failure rate is 4/9 (≈0.44)"
+        );
+        cb.record_failure();
+        assert!(
+            !cb.is_call_allowed(),
+            "Should trip after 10 requests with a 50% failure rate"
+        );
+
+        assert!(
+            matches!(cb.state, State::Open { .. }),
+            "State should be Open"
+        );
+    }
+    #[test]
+    fn success_resets_consecutive_failures() {
+        let mut cb = default_breaker();
+        cb.consecutive_failure_threshold = 5;
+
+        for _ in 0..cb.consecutive_failure_threshold - 1 {
+            cb.record_failure();
+        }
+
+        cb.record_success();
+
+        if let State::Closed {
+            consecutive_failures,
+            ..
+        } = cb.state
+        {
+            assert_eq!(consecutive_failures, 0);
+        } else {
+            panic!("State should be Closed");
+        }
+
+        cb.record_failure();
+        assert!(cb.is_call_allowed());
+        assert!(matches!(cb.state, State::Closed { .. }));
+    }
+
+    #[test]
+    fn open_to_half_open_after_duration() {
+        let mut cb = default_breaker();
+        cb.open_duration = Duration::from_millis(50);
+        cb.trip();
+
+        assert!(!cb.is_call_allowed());
+        assert!(matches!(cb.state, State::Open { .. }));
+
+        thread::sleep(cb.open_duration);
+
+        assert!(cb.is_call_allowed());
+        assert!(matches!(cb.state, State::HalfOpen { .. }));
+    }
+
+    #[test]
+    fn half_open_success_probe_closes_breaker() {
+        let mut cb = default_breaker();
+        cb.state = State::HalfOpen {
+            success_probes: 0,
+            total_probes: 0,
+        };
+
+        assert!(cb.is_call_allowed());
+        cb.record_success();
+
+        assert!(matches!(cb.state, State::Closed { .. }));
+        assert!(cb.is_call_allowed());
+    }
+
+    #[test]
+    fn half_open_failed_probe_opens_breaker() {
+        let mut cb = default_breaker();
+        cb.state = State::HalfOpen {
+            success_probes: 0,
+            total_probes: 0,
+        };
+        cb.open_duration = Duration::from_millis(50);
+
+        assert!(cb.is_call_allowed());
+        cb.record_failure();
+
+        assert!(matches!(cb.state, State::Open { .. }));
+        assert!(!cb.is_call_allowed());
+    }
+
+    #[test]
+    fn half_open_allows_limited_probes() {
+        let mut cb = default_breaker();
+        cb.half_open_max_requests = 3;
+        cb.state = State::HalfOpen {
+            success_probes: 0,
+            total_probes: 0,
+        };
+
+        for _ in 0..cb.half_open_max_requests - 1 {
+            assert!(cb.is_call_allowed(), "Should allow probe");
+
+            if let State::HalfOpen {
+                ref mut total_probes,
+                ..
+            } = &mut cb.state
+            {
+                *total_probes += 1;
+            }
+        }
+
+        assert!(cb.is_call_allowed(), "Should allow the last probe");
+        if let State::HalfOpen {
+            ref mut total_probes,
+            ..
+        } = &mut cb.state
+        {
+            *total_probes += 1;
+        }
+
+        assert!(!cb.is_call_allowed(), "Should deny after max probes");
+    }
+}

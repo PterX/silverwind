@@ -42,3 +42,101 @@ impl Middleware for RequestHeaders {
         Ok(())
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+
+    #[test]
+    fn test_add_and_remove_headers() {
+        let mut req = Request::new(BoxBody::default());
+        req.headers_mut()
+            .insert("X-Existing-Header", HeaderValue::from_static("present"));
+        req.headers_mut()
+            .insert("X-Header-To-Remove", HeaderValue::from_static("remove-me"));
+
+        let mut middleware = RequestHeaders {
+            add: {
+                let mut add_headers = HashMap::new();
+                add_headers.insert("X-New-Header".to_string(), "new-value".to_string());
+                add_headers
+            },
+            remove: vec!["X-Header-To-Remove".to_string()],
+        };
+
+        let peer_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+
+        let result = middleware.handle_request(peer_addr, &mut req);
+
+        assert!(result.is_ok());
+
+        let headers = req.headers();
+        assert_eq!(headers.get("X-New-Header").unwrap(), "new-value");
+        assert!(!headers.contains_key("X-Header-To-Remove"));
+        assert!(headers.contains_key("X-Existing-Header"));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_header() {
+        let mut req = Request::new(BoxBody::default());
+
+        let mut middleware = RequestHeaders {
+            add: HashMap::new(),
+            remove: vec!["X-Nonexistent-Header".to_string()],
+        };
+
+        let peer_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+
+        let result = middleware.handle_request(peer_addr, &mut req);
+
+        assert!(result.is_ok());
+
+        assert!(req.headers().is_empty());
+    }
+
+    #[test]
+    fn test_invalid_header_name() {
+        let mut req = Request::new(BoxBody::default());
+
+        let mut middleware = RequestHeaders {
+            add: {
+                let mut add_headers = HashMap::new();
+                add_headers.insert("Invalid Header Name".to_string(), "value".to_string());
+                add_headers
+            },
+            remove: Vec::new(),
+        };
+
+        let peer_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+
+        let result = middleware.handle_request(peer_addr, &mut req);
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(e.0.contains("Invalid header name"));
+        }
+    }
+
+    #[test]
+    fn test_invalid_header_value() {
+        let mut req = Request::new(BoxBody::default());
+
+        let mut middleware = RequestHeaders {
+            add: {
+                let mut add_headers = HashMap::new();
+                add_headers.insert("X-Valid-Header".to_string(), "Invalid\r\nValue".to_string());
+                add_headers
+            },
+            remove: Vec::new(),
+        };
+
+        let peer_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+
+        let result = middleware.handle_request(peer_addr, &mut req);
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(e.0.contains("Invalid header value"));
+        }
+    }
+}
