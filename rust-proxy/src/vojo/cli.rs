@@ -6,6 +6,7 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use std::path::PathBuf;
 use std::sync::Arc;
+
 use std::sync::Mutex;
 #[derive(ValueEnum, Debug, Clone)]
 pub enum InputFormat {
@@ -13,7 +14,7 @@ pub enum InputFormat {
     Swagger,
 }
 #[derive(Parser, Debug, Clone)]
-#[command(name = "Spire", version = "1.0", about = "The Spire API Gateway", long_about = None) ]
+#[command(name = "Spire", version = crate_version!(), about = concat!("The Spire API Gateway v", crate_version!()), long_about = None) ]
 pub struct Cli {
     #[arg(short = 'f', long, default_value = "config.yaml")]
     pub config_path: String,
@@ -22,7 +23,11 @@ pub struct Cli {
 }
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    #[command(alias = "conv")]
+    #[command(
+        alias = "conv",
+        visible_alias = "conv",
+        about = "Converts an OpenAPI/Swagger file into a gateway configuration"
+    )]
     Convert(ConvertArgs),
 }
 

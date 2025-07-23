@@ -31,6 +31,8 @@ use crate::configuration_service::app_config_service;
 use crate::vojo::app_error::AppError;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate clap;
 use crate::control_plane::rest_api::start_control_plane;
 use tracing_subscriber::reload::Handle;
 
