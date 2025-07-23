@@ -203,7 +203,6 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::USER_AGENT, "test-agent".parse().unwrap());
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        println!("a-----------------");
         let mut middleware = MiddleWares::RateLimit(Arc::new(Mutex::new(Ratelimit::TokenBucket(
             TokenBucketRateLimit::default(),
         ))));

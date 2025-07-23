@@ -37,6 +37,7 @@ impl From<Status> for AppError {
         AppError(format!("Status error: {status}"))
     }
 }
+
 impl From<&str> for AppError {
     fn from(s: &str) -> Self {
         AppError(s.to_string())
@@ -85,9 +86,7 @@ impl From<delay_timer::error::TaskError> for AppError {
 }
 impl From<tracing_subscriber::util::TryInitError> for AppError {
     fn from(error: tracing_subscriber::util::TryInitError) -> Self {
-        AppError(format!(
-            "Tracing subscriber initialization error: {error}"
-        ))
+        AppError(format!("Tracing subscriber initialization error: {error}"))
     }
 }
 impl From<tracing_appender::rolling::InitError> for AppError {
