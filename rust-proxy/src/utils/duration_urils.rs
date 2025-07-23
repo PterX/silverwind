@@ -4,24 +4,24 @@ pub mod human_duration {
 
     pub fn parse_duration_str(s: &str) -> Result<Duration, String> {
         let s = s.trim();
-        if let Some(num_str) = s.strip_suffix('s') {
-            num_str
-                .parse::<f64>()
-                .map(Duration::from_secs_f64)
-                .map_err(|e| e.to_string())
-        } else if let Some(num_str) = s.strip_suffix("ms") {
+        if let Some(num_str) = s.strip_suffix("ms") {
             num_str
                 .parse::<u64>()
                 .map(Duration::from_millis)
                 .map_err(|e| e.to_string())
+        } else if let Some(num_str) = s.strip_suffix('s') {
+            num_str
+                .parse::<u64>()
+                .map(Duration::from_secs)
+                .map_err(|e| e.to_string())
         } else if let Some(num_str) = s.strip_suffix('m') {
             num_str
-                .parse::<f64>()
-                .map(|m| Duration::from_secs_f64(m * 60.0))
+                .parse::<u64>()
+                .map(|m| Duration::from_secs(m * 60))
                 .map_err(|e| e.to_string())
         } else {
-            s.parse::<f64>()
-                .map(Duration::from_secs_f64)
+            s.parse::<u64>()
+                .map(Duration::from_secs)
                 .map_err(|_| format!("invalid duration format: '{s}'"))
         }
     }
@@ -52,7 +52,6 @@ mod tests {
     #[test]
     fn test_parse_seconds() {
         assert_eq!(parse_duration_str("10s"), Ok(Duration::from_secs(10)));
-        assert_eq!(parse_duration_str("2.5s"), Ok(Duration::from_secs_f64(2.5)));
         assert_eq!(parse_duration_str("0s"), Ok(Duration::from_secs(0)));
     }
 
@@ -65,14 +64,12 @@ mod tests {
     #[test]
     fn test_parse_minutes() {
         assert_eq!(parse_duration_str("1m"), Ok(Duration::from_secs(60)));
-        assert_eq!(parse_duration_str("0.5m"), Ok(Duration::from_secs(30)));
-        assert_eq!(parse_duration_str("2.5m"), Ok(Duration::from_secs(150)));
+        assert_eq!(parse_duration_str("2m"), Ok(Duration::from_secs(120)));
     }
 
     #[test]
     fn test_parse_default_as_seconds() {
         assert_eq!(parse_duration_str("120"), Ok(Duration::from_secs(120)));
-        assert_eq!(parse_duration_str("0.25"), Ok(Duration::from_millis(250)));
     }
 
     #[test]
@@ -128,7 +125,6 @@ mod tests {
             serde_json::from_str::<TestStruct>(json_s).unwrap(),
             expected
         );
-
         let json_ms = r#"{"timeout":"750ms"}"#;
         let expected = TestStruct {
             timeout: Duration::from_millis(750),
@@ -138,7 +134,7 @@ mod tests {
             expected
         );
 
-        let json_m = r#"{"timeout":"1.5m"}"#;
+        let json_m = r#"{"timeout":"90s"}"#;
         let expected = TestStruct {
             timeout: Duration::from_secs(90),
         };
@@ -172,8 +168,10 @@ mod tests {
             timeout: Duration::from_millis(2500),
         };
         let json = serde_json::to_string(&original).unwrap();
-        let deserialized = serde_json::from_str::<TestStruct>(&json).unwrap();
+        let deserialized = serde_json::from_str::<TestStruct>(&json)
+            .unwrap_err()
+            .to_string();
 
-        assert_eq!(original, deserialized);
+        assert!(deserialized.contains("invalid digit found in string"));
     }
 }

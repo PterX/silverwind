@@ -214,3 +214,265 @@ impl MatcherRule {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http::{header, HeaderValue, Method};
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_path_prefix_match_success() {
+        let mut rule = MatcherRule::Path {
+            value: "/api/v1".to_string(),
+            match_type: PathMatchType::Prefix,
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(rule.matches(&Method::GET, "/api/v1/users", &headers));
+    }
+
+    #[test]
+    fn test_path_prefix_match_failure() {
+        let mut rule = MatcherRule::Path {
+            value: "/api/v1".to_string(),
+            match_type: PathMatchType::Prefix,
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(!rule.matches(&Method::GET, "/app/v1/users", &headers));
+    }
+
+    #[test]
+    fn test_path_exact_match_success() {
+        let mut rule = MatcherRule::Path {
+            value: "/api/v1/users".to_string(),
+            match_type: PathMatchType::Exact,
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(rule.matches(&Method::GET, "/api/v1/users", &headers));
+    }
+
+    #[test]
+    fn test_path_exact_match_failure() {
+        let mut rule = MatcherRule::Path {
+            value: "/api/v1/users".to_string(),
+            match_type: PathMatchType::Exact,
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(!rule.matches(&Method::GET, "/api/v1/users/1", &headers));
+    }
+
+    #[test]
+    fn test_path_regex_match_success() {
+        let mut rule = MatcherRule::Path {
+            value: "^/users/\\d+$".to_string(),
+            match_type: PathMatchType::Regex,
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(rule.matches(&Method::GET, "/users/123", &headers));
+    }
+
+    #[test]
+    fn test_path_regex_match_failure() {
+        let mut rule = MatcherRule::Path {
+            value: "^/users/\\d+$".to_string(),
+            match_type: PathMatchType::Regex,
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(!rule.matches(&Method::GET, "/users/abc", &headers));
+    }
+
+    #[test]
+    fn test_path_regex_invalid_pattern() {
+        let mut rule = MatcherRule::Path {
+            value: "[".to_string(), // Invalid regex pattern
+            match_type: PathMatchType::Regex,
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(!rule.matches(&Method::GET, "/users/123", &headers));
+    }
+
+    #[test]
+    fn test_method_match_success() {
+        let mut rule = MatcherRule::Method {
+            values: HashSet::from(["GET".to_string(), "POST".to_string()]),
+        };
+        let headers = HeaderMap::new();
+        assert!(rule.matches(&Method::GET, "/any/path", &headers));
+    }
+
+    #[test]
+    fn test_method_match_failure() {
+        let mut rule = MatcherRule::Method {
+            values: HashSet::from(["GET".to_string(), "POST".to_string()]),
+        };
+        let headers = HeaderMap::new();
+        assert!(!rule.matches(&Method::PUT, "/any/path", &headers));
+    }
+
+    #[test]
+    fn test_host_match_success() {
+        let mut rule = MatcherRule::Host {
+            value: r"^(api|www)\.example\.com$".to_string(),
+            regex: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("api.example.com"));
+        assert!(rule.matches(&Method::GET, "/", &headers));
+    }
+
+    #[test]
+    fn test_host_match_failure() {
+        let mut rule = MatcherRule::Host {
+            value: r"^(api|www)\.example\.com$".to_string(),
+            regex: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("other.example.com"));
+        assert!(!rule.matches(&Method::GET, "/", &headers));
+    }
+
+    #[test]
+    fn test_host_match_header_missing() {
+        let mut rule = MatcherRule::Host {
+            value: r"^(api|www)\.example\.com$".to_string(),
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(!rule.matches(&Method::GET, "/", &headers));
+    }
+
+    #[test]
+    fn test_host_match_invalid_regex() {
+        let mut rule = MatcherRule::Host {
+            value: "[invalid".to_string(),
+            regex: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("api.example.com"));
+        assert!(!rule.matches(&Method::GET, "/", &headers));
+    }
+
+    #[test]
+    fn test_header_match_success() {
+        let mut rule = MatcherRule::Header {
+            name: "x-request-id".to_string(),
+            value: r"^token-\d+$".to_string(),
+            regex: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert("x-request-id", HeaderValue::from_static("token-12345"));
+        assert!(rule.matches(&Method::GET, "/", &headers));
+    }
+
+    #[test]
+    fn test_header_match_failure_value() {
+        let mut rule = MatcherRule::Header {
+            name: "x-request-id".to_string(),
+            value: r"^token-\d+$".to_string(),
+            regex: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-request-id",
+            HeaderValue::from_static("invalid-token-format"),
+        );
+        assert!(!rule.matches(&Method::GET, "/", &headers));
+    }
+
+    #[test]
+    fn test_header_match_failure_missing() {
+        let mut rule = MatcherRule::Header {
+            name: "x-request-id".to_string(),
+            value: r"^token-\d+$".to_string(),
+            regex: None,
+        };
+        let headers = HeaderMap::new();
+        assert!(!rule.matches(&Method::GET, "/", &headers));
+    }
+
+    #[test]
+    fn test_header_match_invalid_regex() {
+        let mut rule = MatcherRule::Header {
+            name: "x-request-id".to_string(),
+            value: "[invalid".to_string(),
+            regex: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert("x-request-id", HeaderValue::from_static("token-12345"));
+        assert!(!rule.matches(&Method::GET, "/", &headers));
+    }
+
+    #[test]
+    fn test_partialeq_path_equal() {
+        let r1 = MatcherRule::Path {
+            value: "/path".to_string(),
+            match_type: PathMatchType::Prefix,
+            regex: None,
+        };
+        let r2 = MatcherRule::Path {
+            value: "/path".to_string(),
+            match_type: PathMatchType::Prefix,
+            regex: None,
+        };
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn test_partialeq_path_not_equal() {
+        let r1 = MatcherRule::Path {
+            value: "/path".to_string(),
+            match_type: PathMatchType::Prefix,
+            regex: None,
+        };
+        let r2 = MatcherRule::Path {
+            value: "/path".to_string(),
+            match_type: PathMatchType::Exact,
+            regex: None,
+        };
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn test_partialeq_different_variants() {
+        let r1 = MatcherRule::Path {
+            value: "/path".to_string(),
+            match_type: PathMatchType::Prefix,
+            regex: None,
+        };
+        let r2 = MatcherRule::Host {
+            value: "example.com".to_string(),
+            regex: None,
+        };
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn test_partialeq_ignores_cached_regex() {
+        let mut r1 = MatcherRule::Path {
+            value: "^/users/\\d+$".to_string(),
+            match_type: PathMatchType::Regex,
+            regex: None,
+        };
+        let r2 = MatcherRule::Path {
+            value: "^/users/\\d+$".to_string(),
+            match_type: PathMatchType::Regex,
+            regex: None,
+        };
+
+        assert_eq!(r1, r2);
+
+        let headers = HeaderMap::new();
+        r1.matches(&Method::GET, "/users/123", &headers);
+
+        assert!(matches!(&r1, MatcherRule::Path { regex, .. } if regex.is_some()));
+        assert!(matches!(&r2, MatcherRule::Path { regex, .. } if regex.is_none()));
+
+        assert_eq!(r1, r2);
+    }
+}
