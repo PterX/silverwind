@@ -296,4 +296,191 @@ mod tests {
         let result = auth.check_authentication(&headers);
         assert!(result.is_err());
     }
+    use chrono::Duration;
+    use chrono::Utc;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use serde_json::json;
+
+    fn create_test_jwt(
+        secret: &str,
+        claims_json: &serde_json::Value,
+        algorithm: Algorithm,
+    ) -> String {
+        let header = Header::new(algorithm);
+        encode(
+            &header,
+            &claims_json,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_jwt_auth_success() {
+        let secret = "my_super_secret".to_string();
+        let mut auth = JwtAuth {
+            secret: secret.clone(),
+            ..Default::default()
+        };
+        let exp = (Utc::now() + Duration::hours(1)).timestamp();
+        let claims = json!({ "sub": "user123", "exp": exp });
+        let token = create_test_jwt(&secret, &claims, Algorithm::HS256);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+
+        assert!(auth.check_authentication(&headers).unwrap());
+    }
+
+    #[test]
+    fn test_jwt_auth_missing_header() {
+        let mut auth = JwtAuth {
+            secret: "secret".to_string(),
+            ..Default::default()
+        };
+        let headers = HeaderMap::new();
+
+        assert!(!auth.check_authentication(&headers).unwrap());
+    }
+
+    #[test]
+    fn test_jwt_auth_invalid_format_no_bearer() {
+        let mut auth = JwtAuth {
+            secret: "secret".to_string(),
+            ..Default::default()
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", HeaderValue::from_static("some_token"));
+
+        assert!(!auth.check_authentication(&headers).unwrap());
+    }
+
+    #[test]
+    fn test_jwt_auth_wrong_secret() {
+        let encoding_secret = "correct_secret".to_string();
+        let decoding_secret = "wrong_secret".to_string();
+        let mut auth = JwtAuth {
+            secret: decoding_secret,
+            ..Default::default()
+        };
+        let exp = (Utc::now() + Duration::hours(1)).timestamp();
+        let claims = json!({ "sub": "user123", "exp": exp });
+        let token = create_test_jwt(&encoding_secret, &claims, Algorithm::HS256);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        assert!(!auth.check_authentication(&headers).unwrap());
+    }
+
+    #[test]
+    fn test_jwt_auth_expired_token() {
+        let secret = "my_secret".to_string();
+        let mut auth = JwtAuth {
+            secret: secret.clone(),
+            ..Default::default()
+        };
+        let exp = (Utc::now() - Duration::hours(1)).timestamp();
+        let claims = json!({ "sub": "user123", "exp": exp });
+        let token = create_test_jwt(&secret, &claims, Algorithm::HS256);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+
+        assert!(!auth.check_authentication(&headers).unwrap());
+    }
+
+    #[test]
+    fn test_jwt_auth_with_issuer_success() {
+        let secret = "my_secret".to_string();
+        let issuer = "my_app".to_string();
+        let mut auth = JwtAuth {
+            secret: secret.clone(),
+            issuer: Some(issuer.clone()),
+            ..Default::default()
+        };
+
+        let exp = (Utc::now() + Duration::hours(1)).timestamp();
+        let claims = json!({ "sub": "user123", "exp": exp, "iss": issuer });
+        let token = create_test_jwt(&secret, &claims, Algorithm::HS256);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+
+        assert!(auth.check_authentication(&headers).unwrap());
+    }
+
+    #[test]
+    fn test_jwt_auth_with_wrong_issuer() {
+        let secret = "my_secret".to_string();
+        let mut auth = JwtAuth {
+            secret: secret.clone(),
+            issuer: Some("expected_issuer".to_string()),
+            ..Default::default()
+        };
+        let exp = (Utc::now() + Duration::hours(1)).timestamp();
+        let claims = json!({ "sub": "user123", "exp": exp, "iss": "wrong_issuer" });
+        let token = create_test_jwt(&secret, &claims, Algorithm::HS256);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+
+        assert!(!auth.check_authentication(&headers).unwrap());
+    }
+
+    #[test]
+    fn test_jwt_auth_with_audience_success() {
+        let secret = "my_secret".to_string();
+        let audience = "my_audience".to_string();
+        let mut auth = JwtAuth {
+            secret: secret.clone(),
+            audience: Some(audience.clone()),
+            ..Default::default()
+        };
+        let exp = (Utc::now() + Duration::hours(1)).timestamp();
+        let claims = json!({ "sub": "user123", "exp": exp, "aud": audience });
+        let token = create_test_jwt(&secret, &claims, Algorithm::HS256);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+
+        assert!(auth.check_authentication(&headers).unwrap());
+    }
+
+    #[test]
+    fn test_authentication_enum_jwt() {
+        let secret = "my_super_secret".to_string();
+        let mut auth = Authentication::Jwt(JwtAuth {
+            secret: secret.clone(),
+            ..Default::default()
+        });
+        let exp = (Utc::now() + Duration::hours(1)).timestamp();
+        let claims = json!({ "sub": "user123", "exp": exp });
+        let token = create_test_jwt(&secret, &claims, Algorithm::HS256);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+
+        assert!(auth.check_authentication(&headers).unwrap());
+    }
 }
