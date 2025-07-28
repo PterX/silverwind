@@ -24,7 +24,6 @@ pub struct Cli {
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
     #[command(
-        alias = "conv",
         visible_alias = "conv",
         about = "Converts an OpenAPI/Swagger file into a gateway configuration"
     )]
