@@ -14,9 +14,8 @@ use http::Response;
 use http::{Method, Request};
 use hyper::body::Bytes;
 
+use crate::control_plane::cert_loader::load_or_create_cert;
 use crate::SharedConfig;
-use rustls_pki_types::CertificateDer;
-use std::io::BufReader;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -140,29 +139,26 @@ impl GrpcProxy {
             };
         }
     }
-    pub async fn start_tls_proxy(
-        &mut self,
-        pem_str: String,
-        key_str: String,
-    ) -> Result<(), AppError> {
+    pub async fn start_tls_proxy(&mut self, domains: Vec<String>) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
-        let mut cer_reader = BufReader::new(pem_str.as_bytes());
-        // let certs = rustls_pemfile::certs(&mut cer_reader)
-        //     .unwrap()
-        //     .iter()
-        //     .map(|s| rustls::Certificate((*s).clone()))
-        //     .collect();
-        let certs: Vec<CertificateDer<'_>> =
-            rustls_pemfile::certs(&mut cer_reader).collect::<Result<Vec<_>, _>>()?;
+        let tls_cert = load_or_create_cert(domains.first().ok_or(AppError("".to_string()))?)?;
+        // let mut cer_reader = BufReader::new(pem_str.as_bytes());
+        // // let certs = rustls_pemfile::certs(&mut cer_reader)
+        // //     .unwrap()
+        // //     .iter()
+        // //     .map(|s| rustls::Certificate((*s).clone()))
+        // //     .collect();
+        // let certs: Vec<CertificateDer<'_>> =
+        //     rustls_pemfile::certs(&mut cer_reader).collect::<Result<Vec<_>, _>>()?;
 
-        let mut key_reader = BufReader::new(key_str.as_bytes());
-        let key_der = rustls_pemfile::private_key(&mut key_reader)?.ok_or("key_der is none")?;
+        // let mut key_reader = BufReader::new(key_str.as_bytes());
+        // let key_der = rustls_pemfile::private_key(&mut key_reader)?.ok_or("key_der is none")?;
 
         let tls_cfg = {
             let cfg = rustls::ServerConfig::builder()
                 .with_no_client_auth()
-                .with_single_cert(certs, key_der)?;
+                .with_single_cert(tls_cert.cert, tls_cert.key)?;
             Arc::new(cfg)
         };
         let tls_acceptor = TlsAcceptor::from(tls_cfg);

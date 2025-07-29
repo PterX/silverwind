@@ -4,6 +4,7 @@ use crate::middleware::middlewares::Middleware;
 use crate::utils::uuid::get_uuid;
 use crate::vojo::anomaly_detection::AnomalyDetectionType;
 use crate::vojo::app_error::AppError;
+use crate::vojo::domain_config::DomainsConfig;
 use crate::vojo::health_check::HealthCheckType;
 use crate::vojo::matcher::MatcherRule;
 use crate::vojo::router::deserialize_router;
@@ -198,10 +199,8 @@ pub struct ApiService {
 
     #[serde(rename = "protocol")]
     pub server_type: ServiceType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cert_str: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_str: Option<String>,
+    #[serde(rename = "domains_config")]
+    pub domain_config: Vec<DomainsConfig>,
     #[serde(rename = "routes")]
     pub route_configs: Vec<RouteConfig>,
     #[serde(skip_deserializing, skip_serializing)]
@@ -218,22 +217,19 @@ impl<'de> Deserialize<'de> for ApiService {
             port: i32,
             #[serde(rename = "protocol")]
             pub server_type: ServiceType,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub cert_str: Option<String>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub key_str: Option<String>,
+            #[serde(rename = "domains_config")]
+            pub domain_config: Vec<DomainsConfig>,
             #[serde(rename = "routes")]
             pub route_configs: Vec<RouteConfig>,
         }
 
         let api_service_without_sender = ApiServiceWithoutSender::deserialize(deserializer)?;
-        let (sender, _) = mpsc::channel(1); // Create a new channel for the deserialized instance
+        let (sender, _) = mpsc::channel(1);
 
         Ok(ApiService {
             listen_port: api_service_without_sender.port,
             server_type: api_service_without_sender.server_type,
-            cert_str: api_service_without_sender.cert_str,
-            key_str: api_service_without_sender.key_str,
+            domain_config: api_service_without_sender.domain_config,
             route_configs: api_service_without_sender.route_configs,
             sender,
         })
@@ -243,8 +239,6 @@ impl PartialEq for ApiService {
     fn eq(&self, other: &Self) -> bool {
         self.listen_port == other.listen_port
             && self.server_type == other.server_type
-            && self.cert_str == other.cert_str
-            && self.key_str == other.key_str
             && self.route_configs == other.route_configs
     }
 }
@@ -255,8 +249,7 @@ impl Default for ApiService {
         Self {
             listen_port: Default::default(),
             server_type: Default::default(),
-            cert_str: Default::default(),
-            key_str: Default::default(),
+            domain_config: Default::default(),
             route_configs: Default::default(),
 
             sender,

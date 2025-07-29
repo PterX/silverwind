@@ -11,6 +11,7 @@ use hyper::header::{CONNECTION, SEC_WEBSOCKET_KEY};
 use hyper::Method;
 use hyper::StatusCode;
 
+use crate::control_plane::cert_loader::load_or_create_cert;
 use crate::proxy::http1::websocket_proxy::server_upgrade;
 use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
 use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
@@ -20,9 +21,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
-use rustls_pki_types::CertificateDer;
 use serde_json::json;
-use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -84,28 +83,26 @@ impl HttpProxy {
 
         Ok(())
     }
-    pub async fn start_https_server(
-        &mut self,
-        pem_str: String,
-        key_str: String,
-    ) -> Result<(), AppError> {
+    pub async fn start_https_server(&mut self, domains: Vec<String>) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
         let client = AppClients::new(self.shared_config.clone(), self.port).await?;
         let mapping_key_clone1 = self.mapping_key.clone();
 
-        let mut cer_reader = BufReader::new(pem_str.as_bytes());
-        let certs: Vec<CertificateDer<'_>> =
-            rustls_pemfile::certs(&mut cer_reader).collect::<Result<Vec<_>, _>>()?;
+        let tls_cert = load_or_create_cert(domains.first().ok_or(AppError("".to_string()))?)?;
 
-        let mut key_reader = BufReader::new(key_str.as_bytes());
-        let key_der = rustls_pemfile::private_key(&mut key_reader)?
-            .ok_or_else(|| AppError("Key not found in PEM file".to_string()))?;
+        // let mut cer_reader = BufReader::new(pem_str.as_bytes());
+        // let certs: Vec<CertificateDer<'_>> =
+        //     rustls_pemfile::certs(&mut cer_reader).collect::<Result<Vec<_>, _>>()?;
+
+        // let mut key_reader = BufReader::new(key_str.as_bytes());
+        // let key_der = rustls_pemfile::private_key(&mut key_reader)?
+        //     .ok_or_else(|| AppError("Key not found in PEM file".to_string()))?;
 
         let tls_cfg = {
             let cfg = rustls::ServerConfig::builder()
                 .with_no_client_auth()
-                .with_single_cert(certs, key_der)?;
+                .with_single_cert(tls_cert.cert, tls_cert.key)?;
             Arc::new(cfg)
         };
         let tls_acceptor = TlsAcceptor::from(tls_cfg);

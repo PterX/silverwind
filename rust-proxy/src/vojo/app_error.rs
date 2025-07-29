@@ -32,6 +32,11 @@ macro_rules! app_error {
         AppError(format!($($arg)*))
     }
 }
+impl From<rustls_pki_types::pem::Error> for AppError {
+    fn from(error: rustls_pki_types::pem::Error) -> Self {
+        AppError(format!("PEM error: {error}"))
+    }
+}
 impl From<Status> for AppError {
     fn from(status: Status) -> Self {
         AppError(format!("Status error: {status}"))

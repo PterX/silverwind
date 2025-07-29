@@ -22,19 +22,10 @@ pub async fn init(shared_config: SharedConfig) -> Result<(), AppError> {
         let (sender, receiver) = mpsc::channel::<()>(1000);
         item.sender = sender;
         let cloned_config = shared_config.clone();
-        let cert_str = item.cert_str.clone();
-        let key_str = item.key_str.clone();
+
         tokio::task::spawn(async move {
-            if let Err(err) = start_proxy(
-                cloned_config,
-                port,
-                receiver,
-                server_type,
-                mapping_key,
-                cert_str,
-                key_str,
-            )
-            .await
+            if let Err(err) =
+                start_proxy(cloned_config, port, receiver, server_type, mapping_key).await
             {
                 error!("{err}");
             }
@@ -49,8 +40,6 @@ pub async fn start_proxy(
     channel: mpsc::Receiver<()>,
     server_type: ServiceType,
     mapping_key: String,
-    cert_str: Option<String>,
-    key_str: Option<String>,
 ) -> Result<(), AppError> {
     if server_type == ServiceType::Http {
         let mut http_proxy = HttpProxy {
@@ -61,21 +50,27 @@ pub async fn start_proxy(
         };
         http_proxy.start_http_server().await
     } else if server_type == ServiceType::Https {
-        let pem_str = cert_str.ok_or(app_error!(
-            "Certificate (cert_str) is missing for TLS service on port {}",
-            port
-        ))?;
-        let key_str = key_str.ok_or(app_error!(
-            "Private key (key_str) is missing for TLS service on port {}",
-            port
-        ))?;
         let mut http_proxy = HttpProxy {
-            shared_config,
+            shared_config: shared_config.clone(),
             port,
             channel,
             mapping_key: mapping_key.clone(),
         };
-        http_proxy.start_https_server(pem_str, key_str).await
+        let domains = {
+            let config = shared_config.shared_data.lock()?;
+            config
+                .api_service_config
+                .get(&port)
+                .ok_or(app_error!(
+                    "HTTPS 服务在端口 {} 上缺少 'domains' 配置",
+                    port
+                ))?
+                .domain_config
+                .iter()
+                .map(|item| item.domain_name.clone())
+                .collect::<Vec<String>>()
+        };
+        http_proxy.start_https_server(domains).await
     } else if server_type == ServiceType::Tcp {
         let mut tcp_proxy = TcpProxy {
             shared_config,
@@ -93,21 +88,27 @@ pub async fn start_proxy(
         };
         grpc_proxy.start_proxy().await
     } else {
-        let pem_str = cert_str.ok_or(app_error!(
-            "Certificate (cert_str) is missing for TLS service on port {}",
-            port
-        ))?;
-        let key_str = key_str.ok_or(app_error!(
-            "Private key (key_str) is missing for TLS service on port {}",
-            port
-        ))?;
         let mut grpc_proxy = GrpcProxy {
-            shared_config,
+            shared_config: shared_config.clone(),
             port,
             mapping_key,
             channel,
         };
-        grpc_proxy.start_tls_proxy(pem_str, key_str).await
+        let domains = {
+            let config = shared_config.shared_data.lock()?;
+            config
+                .api_service_config
+                .get(&port)
+                .ok_or(app_error!(
+                    "HTTPS 服务在端口 {} 上缺少 'domains' 配置",
+                    port
+                ))?
+                .domain_config
+                .iter()
+                .map(|item| item.domain_name.clone())
+                .collect::<Vec<String>>()
+        };
+        grpc_proxy.start_tls_proxy(domains).await
     }
 }
 #[cfg(test)]
@@ -130,8 +131,6 @@ mod tests {
             rx,
             ServiceType::Http,
             "test-http".to_string(),
-            None,
-            None,
         ));
 
         tokio::time::sleep(Duration::from_millis(10)).await; // Give it time to start
@@ -203,8 +202,6 @@ peIJpwo+Kuf964DexDVglw==
             rx,
             ServiceType::Https,
             "test-https".to_string(),
-            Some(cert.to_string()),
-            Some(key.to_string()),
         ));
         tokio::time::sleep(Duration::from_millis(10)).await;
         let cc = tx.send(()).await;
@@ -223,8 +220,6 @@ peIJpwo+Kuf964DexDVglw==
             rx,
             ServiceType::Https,
             "test-https-fail".to_string(),
-            Some("dummy_key_content".to_string()),
-            None,
         )
         .await;
         assert!(result.is_err());
@@ -245,8 +240,6 @@ peIJpwo+Kuf964DexDVglw==
             rx,
             ServiceType::Tcp,
             "test-tcp".to_string(),
-            None,
-            None,
         ));
         tokio::time::sleep(Duration::from_millis(10)).await;
         tx.send(()).await.expect("Failed to send shutdown signal");
@@ -265,8 +258,6 @@ peIJpwo+Kuf964DexDVglw==
             rx,
             ServiceType::Http2,
             "test-http2".to_string(),
-            None,
-            None,
         ));
         tokio::time::sleep(Duration::from_millis(10)).await;
         tx.send(()).await.expect("Failed to send shutdown signal");
@@ -285,8 +276,6 @@ peIJpwo+Kuf964DexDVglw==
             rx,
             ServiceType::Http2Tls,
             "test-grpc-tls".to_string(),
-            Some("dummy_pem_content".to_string()),
-            Some("dummy_key_content".to_string()),
         ));
         tokio::time::sleep(Duration::from_millis(10)).await;
         let tt = tx.send(()).await;
@@ -306,8 +295,6 @@ peIJpwo+Kuf964DexDVglw==
             rx,
             ServiceType::Http2Tls,
             "test-grpc-tls-fail".to_string(),
-            Some("dummy_pem_content".to_string()),
-            None,
         )
         .await;
         assert!(result.is_err());

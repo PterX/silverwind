@@ -3,7 +3,6 @@ use crate::control_plane::lets_encrypt::lets_encrypt_certificate;
 use crate::vojo::app_config::ApiService;
 use crate::vojo::app_config::AppConfig;
 use crate::vojo::app_config::RouteConfig;
-use crate::vojo::app_config::ServiceType;
 use axum::middleware::Next;
 use std::time::Instant;
 
@@ -63,9 +62,9 @@ async fn post_app_config_with_error(
     let api_service: ApiService = serde_yaml::from_slice(&bytes)?;
     let current_type = api_service.server_type.clone();
     let port = api_service.listen_port;
-    if current_type == ServiceType::Https || current_type == ServiceType::Http2Tls {
-        validate_tls_config(api_service.cert_str.clone(), api_service.key_str.clone())?;
-    }
+    // if current_type == ServiceType::Https || current_type == ServiceType::Http2Tls {
+    //     validate_tls_config(api_service.cert_str.clone(), api_service.key_str.clone())?;
+    // }
     let mut rw_global_lock = shared_config.shared_data.lock()?;
     match rw_global_lock
         .api_service_config
