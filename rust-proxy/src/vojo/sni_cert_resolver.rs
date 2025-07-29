@@ -3,13 +3,10 @@ use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign;
 use std::collections::HashMap;
 use std::sync::Arc;
-/// SniCertResolver 会存储所有已加载的证书，
-/// 并在 TLS 握手时根据客户端请求的域名 (SNI) 选择一个。
+
 #[derive(Debug)]
 pub struct SniCertResolver {
-    /// 使用域名作为键，存储对应的证书链和私钥
     certs: HashMap<String, Arc<sign::CertifiedKey>>,
-    /// 当客户端没有提供 SNI 或者 SNI 不匹配任何已知域名时，使用的默认证书
     default_cert: Option<Arc<sign::CertifiedKey>>,
 }
 
