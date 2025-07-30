@@ -4,7 +4,6 @@ use crate::middleware::middlewares::Middleware;
 use crate::utils::uuid::get_uuid;
 use crate::vojo::anomaly_detection::AnomalyDetectionType;
 use crate::vojo::app_error::AppError;
-use crate::vojo::domain_config::DomainsConfig;
 use crate::vojo::health_check::HealthCheckType;
 use crate::vojo::matcher::MatcherRule;
 use crate::vojo::router::deserialize_router;
@@ -199,8 +198,8 @@ pub struct ApiService {
 
     #[serde(rename = "protocol")]
     pub server_type: ServiceType,
-    #[serde(rename = "domains_config")]
-    pub domain_config: Vec<DomainsConfig>,
+    #[serde(rename = "domains")]
+    pub domain_config: Vec<String>,
     #[serde(rename = "routes")]
     pub route_configs: Vec<RouteConfig>,
     #[serde(skip_deserializing, skip_serializing)]
@@ -217,8 +216,9 @@ impl<'de> Deserialize<'de> for ApiService {
             port: i32,
             #[serde(rename = "protocol")]
             pub server_type: ServiceType,
-            #[serde(rename = "domains_config")]
-            pub domain_config: Vec<DomainsConfig>,
+            #[serde(rename = "domains")]
+            #[serde(default)]
+            pub domain_config: Vec<String>,
             #[serde(rename = "routes")]
             pub route_configs: Vec<RouteConfig>,
         }

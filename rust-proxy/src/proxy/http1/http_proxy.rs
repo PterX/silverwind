@@ -89,7 +89,9 @@ impl HttpProxy {
         let client = AppClients::new(self.shared_config.clone(), self.port).await?;
         let mapping_key_clone1 = self.mapping_key.clone();
 
-        let tls_cert = load_or_create_cert(domains.first().ok_or(AppError("".to_string()))?)?;
+        let tls_cert = load_or_create_cert(domains.first().ok_or(AppError(
+            "Cannot create certificate because the domains list is empty.".to_string(),
+        ))?)?;
 
         // let mut cer_reader = BufReader::new(pem_str.as_bytes());
         // let certs: Vec<CertificateDer<'_>> =

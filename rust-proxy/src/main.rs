@@ -76,7 +76,6 @@ async fn run_app(
     let config = load_config(&cli).await?;
     info!("Configuration loaded successfully.");
     println!("Full configuration: {config:?}");
-
     reconfigure_logger(&reload_handle, &config);
     info!("Logger reconfigured to level: {}", config.get_log_level());
 
@@ -112,7 +111,6 @@ fn reconfigure_logger(
     if !static_config.health_check_log_enabled.unwrap_or(false) {
         targets.push(("spire::health_check::health_check_task", LevelFilter::OFF));
     }
-
     let _ = reload_handle.modify(|filter| {
         *filter = filter::Targets::new()
             .with_targets(targets)

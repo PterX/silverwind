@@ -1,4 +1,5 @@
 use crate::app_error;
+use crate::control_plane::certificate_manager::CertificateManager;
 use crate::health_check::health_check_task::HealthCheck;
 use crate::proxy::http1::http_proxy::HttpProxy;
 use crate::proxy::http2::grpc_proxy::GrpcProxy;
@@ -6,6 +7,7 @@ use crate::proxy::tcp::tcp_proxy::TcpProxy;
 use crate::vojo::app_config::ServiceType;
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::SharedConfig;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub async fn init(shared_config: SharedConfig) -> Result<(), AppError> {
@@ -15,6 +17,9 @@ pub async fn init(shared_config: SharedConfig) -> Result<(), AppError> {
         health_check.start_health_check_loop().await;
     });
     let mut app_config = shared_config.shared_data.lock()?;
+    let mut certificate_manager = CertificateManager::new(Arc::new(app_config.clone()));
+    certificate_manager.start_renewal_task();
+
     for (_, item) in app_config.api_service_config.iter_mut() {
         let port = item.listen_port;
         let server_type = item.server_type.clone();
@@ -65,10 +70,7 @@ pub async fn start_proxy(
                     "HTTPS 服务在端口 {} 上缺少 'domains' 配置",
                     port
                 ))?
-                .domain_config
-                .iter()
-                .map(|item| item.domain_name.clone())
-                .collect::<Vec<String>>()
+                .domain_config.to_vec()
         };
         http_proxy.start_https_server(domains).await
     } else if server_type == ServiceType::Tcp {
@@ -103,10 +105,7 @@ pub async fn start_proxy(
                     "HTTPS 服务在端口 {} 上缺少 'domains' 配置",
                     port
                 ))?
-                .domain_config
-                .iter()
-                .map(|item| item.domain_name.clone())
-                .collect::<Vec<String>>()
+                .domain_config.to_vec()
         };
         grpc_proxy.start_tls_proxy(domains).await
     }

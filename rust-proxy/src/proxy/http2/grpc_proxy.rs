@@ -142,7 +142,9 @@ impl GrpcProxy {
     pub async fn start_tls_proxy(&mut self, domains: Vec<String>) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
-        let tls_cert = load_or_create_cert(domains.first().ok_or(AppError("".to_string()))?)?;
+        let tls_cert = load_or_create_cert(domains.first().ok_or(AppError(
+            "Cannot create certificate because the domains list is empty.".to_string(),
+        ))?)?;
         // let mut cer_reader = BufReader::new(pem_str.as_bytes());
         // // let certs = rustls_pemfile::certs(&mut cer_reader)
         // //     .unwrap()
