@@ -1,7 +1,8 @@
+use crate::control_plane::lets_encrypt::LetsEncryptActions;
 use crate::utils::fs_utils::get_domain_path;
 use crate::vojo::app_config::{AppConfig, ServiceType};
+use crate::vojo::lets_encrypt::LetsEntrypt;
 use crate::{app_error, AppError};
-use chrono::Utc;
 use log::{error, info};
 use std::fs::File;
 use std::io::BufReader;
@@ -49,7 +50,7 @@ impl CertificateManager {
         }
 
         let handle = tokio::spawn(async move {
-            let mut timer = interval(Duration::from_secs(24 * 60 * 60));
+            let mut timer = interval(Duration::from_secs(10));
 
             loop {
                 timer.tick().await;
@@ -84,7 +85,7 @@ impl CertificateManager {
 
         self.renewal_task_handles.push(handle);
     }
-    async fn needs_renewal(domain_config: &String) -> bool {
+    async fn needs_renewal(domain_config: &str) -> bool {
         let domain_name = domain_config;
         if domain_name.is_empty() {
             return true;
@@ -191,7 +192,10 @@ impl CertificateManager {
         if domain_name.is_empty() {
             return Err(app_error!("Renewal failed: domain name is empty."));
         }
-
+        let lets_entrypt = LetsEntrypt {
+            mail_name: "EMAIL".to_string(),
+            domain_name: domain_name.clone(),
+        };
         info!("Simulating renewal process for domain: [{domain_name}]");
 
         let base_path = get_domain_path(domain_name)?;
@@ -207,37 +211,25 @@ impl CertificateManager {
         let cert_path = base_path.join("cert.pem");
         let key_path = base_path.join("key.pem");
 
-        info!(" - Simulating ACME challenge for domain [{domain_name}]...");
-        tokio::time::sleep(Duration::from_secs(2)).await;
-
         info!(
-            " - Simulating request for a new certificate from Let's Encrypt for [{domain_name}]..."
+            " - Performing ACME challenge and requesting certificate for domain [{domain_name}]..."
         );
-        let new_cert_content = format!(
-            "-----BEGIN CERTIFICATE-----\n#\n# DUMMY CERT FOR {}\n# RENEWED AT: {}\n#\n-----END CERTIFICATE-----",
-            domain_name,
-            Utc::now()
-        );
-        let new_key_content = format!(
-            "-----BEGIN PRIVATE KEY-----\n#\n# DUMMY KEY FOR {}\n# RENEWED AT: {}\n#\n-----END PRIVATE KEY-----",
-            domain_name,
-            Utc::now()
-        );
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        let (key_pem, cert_pem) = lets_entrypt.start_request2().await?;
+        info!(" - Successfully obtained certificate and private key.");
 
         info!(" - Saving new certificate to: {cert_path:?}");
-        fs::write(&cert_path, new_cert_content).await.map_err(|e| {
+        fs::write(&cert_path, cert_pem).await.map_err(|e| {
             app_error!("Failed to write certificate file to {:?}: {}", cert_path, e)
         })?;
 
         info!(" - Saving new private key to: {key_path:?}");
-        fs::write(&key_path, new_key_content)
+        fs::write(&key_path, key_pem)
             .await
             .map_err(|e| app_error!("Failed to write private key file to {:?}: {}", key_path, e))?;
 
         info!(
-            "Successfully wrote certificate and private key for domain [{domain_name}] to the local filesystem."
-        );
+        "Successfully wrote certificate and private key for domain [{domain_name}] to the local filesystem."
+    );
 
         Ok(())
     }

@@ -82,7 +82,7 @@ impl LetsEntrypt {
     }
 }
 impl LetsEncryptActions for LetsEntrypt {
-    async fn start_request2(&self) -> Result<String, AppError> {
+    async fn start_request2(&self) -> Result<(String, String), AppError> {
         let account = local_account().await?;
         info!("Account created successfully.");
         let identifiers = [Identifier::Dns(self.domain_name.clone())];
@@ -117,7 +117,7 @@ impl LetsEncryptActions for LetsEntrypt {
         server_handle.await.ok();
 
         info!("private key:\n{private_key_pem}");
-        Ok(cert_chain_pem)
+        Ok((private_key_pem, cert_chain_pem))
     }
 }
 impl LetsEntrypt {

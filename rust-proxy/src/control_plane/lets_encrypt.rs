@@ -14,7 +14,7 @@ struct LetsEncryptResponse {
 }
 #[automock]
 pub trait LetsEncryptActions: Send + Sync {
-    async fn start_request2(&self) -> Result<String, AppError>;
+    async fn start_request2(&self) -> Result<(String, String), AppError>;
 }
 pub async fn lets_encrypt_certificate_logic<LEO: LetsEncryptActions>(
     lets_encrypt_object: LEO,
@@ -47,7 +47,7 @@ mod tests {
         mock_le_actions
             .expect_start_request2()
             .times(1)
-            .returning(|| Ok("mock_certificate_content".to_string()));
+            .returning(|| Ok(("a".to_string(), "mock_certificate_content".to_string())));
         let response = lets_encrypt_certificate_logic(mock_le_actions)
             .await
             .unwrap();
