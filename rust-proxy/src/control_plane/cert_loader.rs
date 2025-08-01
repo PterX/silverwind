@@ -120,8 +120,7 @@ fn create_self_signed_cert(domain: &str) -> Result<Arc<ServerConfig>, AppError> 
         .with_single_cert(cert_chain, key)
         .map_err(|e| {
             AppError(format!(
-                "Failed to create tls config from self-signed cert: {}",
-                e
+                "Failed to create tls config from self-signed cert: {e}"
             ))
         })?;
 
@@ -211,7 +210,7 @@ pub fn load_tls_config(domain: &str) -> Result<Arc<ServerConfig>, AppError> {
         match rustls_pemfile::certs(&mut cert_reader).next() {
             Some(Ok(cert_der)) => {
                 let cert = x509_parser::parse_x509_certificate(&cert_der)
-                    .map_err(|e| AppError(format!("Failed to parse certificate: {:?}", e)))?
+                    .map_err(|e| AppError(format!("Failed to parse certificate: {e:?}")))?
                     .1;
 
                 if cert.validity().is_valid() {
@@ -233,23 +232,22 @@ pub fn load_tls_config(domain: &str) -> Result<Arc<ServerConfig>, AppError> {
                                     std::io::ErrorKind::NotFound,
                                     "No private key found in pem file",
                                 )
-                                .into()
                             })
                         })
-                        .map_err(|e| AppError(format!("Failed to parse private key: {}", e)))?;
+                        .map_err(|e| AppError(format!("Failed to parse private key: {e}")))?;
 
                     let config = ServerConfig::builder()
                         .with_no_client_auth()
                         .with_single_cert(vec![cert_der], private_key)
-                        .map_err(|e| AppError(format!("Failed to create tls config: {}", e)))?;
+                        .map_err(|e| AppError(format!("Failed to create tls config: {e}")))?;
 
                     return Ok(Arc::new(config));
                 } else {
-                    warn!("Certificate for domain '{}' has expired or is not yet valid. Falling back to a self-signed certificate.", domain);
+                    warn!("Certificate for domain '{domain}' has expired or is not yet valid. Falling back to a self-signed certificate.");
                 }
             }
             Some(Err(e)) => {
-                warn!("Failed to parse certificate file for '{}': {}. Falling back to a self-signed certificate.", domain, e);
+                warn!("Failed to parse certificate file for '{domain}': {e}. Falling back to a self-signed certificate.");
             }
             None => {
                 warn!(

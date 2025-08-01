@@ -1,3 +1,4 @@
+use crate::control_plane::cert_loader::load_tls_config;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::proxy::http1::app_clients::AppClients;
 use crate::proxy::proxy_trait::DestinationResult;
@@ -11,7 +12,6 @@ use hyper::header::{CONNECTION, SEC_WEBSOCKET_KEY};
 use hyper::Method;
 use hyper::StatusCode;
 
-use crate::control_plane::cert_loader::load_or_create_cert;
 use crate::proxy::http1::websocket_proxy::server_upgrade;
 use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
 use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
@@ -24,7 +24,6 @@ use hyper_util::rt::TokioIo;
 use serde_json::json;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -89,16 +88,10 @@ impl HttpProxy {
         let client = AppClients::new(self.shared_config.clone(), self.port).await?;
         let mapping_key_clone1 = self.mapping_key.clone();
 
-        let tls_cert = load_or_create_cert(domains.first().ok_or(AppError(
+        let tls_cfg = load_tls_config(domains.first().ok_or(AppError(
             "Cannot create certificate because the domains list is empty.".to_string(),
         ))?)?;
 
-        let tls_cfg = {
-            let cfg = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(tls_cert.cert, tls_cert.key)?;
-            Arc::new(cfg)
-        };
         let tls_acceptor = TlsAcceptor::from(tls_cfg);
         let reveiver = &mut self.channel;
 
@@ -425,8 +418,8 @@ mod tests {
     use std::collections::HashMap;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
+    use std::sync::Arc;
     use std::sync::Mutex;
-
     #[test]
     fn test_http_proxy_creation() {
         let (_, rx) = mpsc::channel(1);
