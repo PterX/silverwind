@@ -6,6 +6,8 @@ use notify::RecursiveMode;
 use notify::Watcher;
 use rcgen::KeyPair;
 use rcgen::{CertificateParams, DistinguishedName};
+use rustls::crypto::ring;
+use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, private_key};
@@ -111,14 +113,22 @@ fn create_self_signed_cert(domain: &str) -> Result<ServerConfig, AppError> {
         "Successfully generated self-signed certificate for domain '{}'.",
         domain
     );
-    let config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(cert_chain, key_der)
-        .map_err(|e| {
-            AppError(format!(
-                "Failed to create tls config from self-signed cert: {e}"
-            ))
-        })?;
+
+    let config = ServerConfig::builder_with_provider(
+        CryptoProvider {
+            cipher_suites: Vec::default(),
+            ..ring::default_provider()
+        }
+        .into(),
+    )
+    .with_safe_default_protocol_versions()?
+    .with_no_client_auth()
+    .with_single_cert(cert_chain, key_der)
+    .map_err(|e| {
+        AppError(format!(
+            "Failed to create tls config from self-signed cert: {e}"
+        ))
+    })?;
 
     Ok(config)
 }
@@ -249,10 +259,17 @@ pub fn load_tls_config(domain: &str) -> Result<ServerConfig, AppError> {
                         })
                         .map_err(|e| AppError(format!("Failed to parse private key: {e}")))?;
 
-                    let config = ServerConfig::builder()
-                        .with_no_client_auth()
-                        .with_single_cert(vec![cert_der], private_key)
-                        .map_err(|e| AppError(format!("Failed to create tls config: {e}")))?;
+                    let config = ServerConfig::builder_with_provider(
+                        CryptoProvider {
+                            cipher_suites: Vec::default(),
+                            ..ring::default_provider()
+                        }
+                        .into(),
+                    )
+                    .with_safe_default_protocol_versions()?
+                    .with_no_client_auth()
+                    .with_single_cert(vec![cert_der], private_key)
+                    .map_err(|e| AppError(format!("Failed to create tls config: {e}")))?;
 
                     return Ok(config);
                 } else {
