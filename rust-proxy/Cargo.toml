@@ -39,6 +39,8 @@ chrono = "0.4.41"
 clap = { version = "4.5.42", features = ["derive","cargo"] }
 delay_timer = "0.11.6"
 derive_builder = "0.20.2"
+notify = "8.1.0"
+
 env_logger = "0.11.8"
 futures = { version = "0.3.31", features = ["thread-pool"] }
 futures-util = { version = "0.3.31", default-features = false }

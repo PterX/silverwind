@@ -93,14 +93,6 @@ impl HttpProxy {
             "Cannot create certificate because the domains list is empty.".to_string(),
         ))?)?;
 
-        // let mut cer_reader = BufReader::new(pem_str.as_bytes());
-        // let certs: Vec<CertificateDer<'_>> =
-        //     rustls_pemfile::certs(&mut cer_reader).collect::<Result<Vec<_>, _>>()?;
-
-        // let mut key_reader = BufReader::new(key_str.as_bytes());
-        // let key_der = rustls_pemfile::private_key(&mut key_reader)?
-        //     .ok_or_else(|| AppError("Key not found in PEM file".to_string()))?;
-
         let tls_cfg = {
             let cfg = rustls::ServerConfig::builder()
                 .with_no_client_auth()

@@ -1,41 +1,48 @@
+use crate::app_error;
 use crate::utils::fs_utils::get_domain_path;
+use crate::vojo::app_error::AppError;
+use notify::RecommendedWatcher;
+use notify::RecursiveMode;
+use notify::Watcher;
 use rcgen::KeyPair;
 use rcgen::{CertificateParams, DistinguishedName};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use rustls_pemfile::{certs, private_key};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::PrivatePkcs8KeyDer;
 use std::fs;
+use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::time::Duration;
 use tracing::info;
-
-use crate::app_error;
-use crate::vojo::app_error::AppError;
 
 pub struct TlsCert {
     pub cert: Vec<CertificateDer<'static>>,
     pub key: PrivateKeyDer<'static>,
 }
 
-pub fn load_or_create_cert(domain: &str) -> Result<TlsCert, AppError> {
-    if let Ok((cert_path, key_path)) = find_cert_path(domain) {
-        if cert_path.exists() && key_path.exists() {
-            info!(
-                "Loading certificate for domain '{}', path: {}",
-                domain,
-                cert_path.display()
-            );
-            return load_cert_from_path(&cert_path, &key_path);
-        }
-    }
+// pub fn load_or_create_cert(domain: &str) -> Result<TlsCert, AppError> {
+//     if let Ok((cert_path, key_path)) = find_cert_path(domain) {
+//         if cert_path.exists() && key_path.exists() {
+//             info!(
+//                 "Loading certificate for domain '{}', path: {}",
+//                 domain,
+//                 cert_path.display()
+//             );
+//             return load_cert_from_path(&cert_path, &key_path);
+//         }
+//     }
 
-    info!(
-        "Certificate not found for domain '{}' at expected path, will generate a self-signed certificate.",
-        domain
-    );
-    create_self_signed_cert(domain)
-}
+//     info!(
+//         "Certificate not found for domain '{}' at expected path, will generate a self-signed certificate.",
+//         domain
+//     );
+//     create_self_signed_cert(domain)
+// }
 
 fn load_cert_from_path(cert_path: &Path, key_path: &Path) -> Result<TlsCert, AppError> {
     let cert_file = fs::File::open(cert_path).map_err(|e| {
@@ -86,7 +93,7 @@ fn find_cert_path(domain: &str) -> Result<(PathBuf, PathBuf), AppError> {
     Ok((cert_path, key_path))
 }
 
-fn create_self_signed_cert(domain: &str) -> Result<TlsCert, AppError> {
+fn create_self_signed_cert(domain: &str) -> Result<Arc<ServerConfig>, AppError> {
     info!(
         "Generating self-signed certificate for domain '{}'...",
         domain
@@ -100,6 +107,7 @@ fn create_self_signed_cert(domain: &str) -> Result<TlsCert, AppError> {
     let cert_der = cert.der().clone();
     let pem = cert.pem();
     let key_der = PrivatePkcs8KeyDer::from_pem_slice(pem.as_bytes())?;
+    let cert_chain = vec![cert_der];
 
     let key = PrivateKeyDer::Pkcs8(key_der);
 
@@ -107,8 +115,152 @@ fn create_self_signed_cert(domain: &str) -> Result<TlsCert, AppError> {
         "Successfully generated self-signed certificate for domain '{}'.",
         domain
     );
-    Ok(TlsCert {
-        cert: vec![cert_der],
-        key,
-    })
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, key)
+        .map_err(|e| {
+            AppError(format!(
+                "Failed to create tls config from self-signed cert: {}",
+                e
+            ))
+        })?;
+
+    Ok(Arc::new(config))
+}
+async fn watch_for_certificate_changes(
+    domain: &str,
+    tls_config: Arc<RwLock<Arc<rustls::ServerConfig>>>,
+) -> Result<(), AppError> {
+    let cert_dir = get_domain_path(domain)?;
+    let cert_path = cert_dir.join("cert.pem");
+    let key_path = cert_dir.join("key.pem");
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+    let mut watcher = match RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                if matches!(
+                    event.kind,
+                    notify::EventKind::Modify(_) | notify::EventKind::Create(_)
+                ) {
+                    let _ = tx.blocking_send(());
+                }
+            }
+        },
+        notify::Config::default(),
+    ) {
+        Ok(w) => w,
+        Err(e) => {
+            error!("Failed to create file watcher: {e}");
+            return Ok(());
+        }
+    };
+
+    if let Err(e) = watcher.watch(&cert_path, RecursiveMode::NonRecursive) {
+        error!("Failed to watch certificate file: {e}");
+        return Ok(());
+    }
+    if let Err(e) = watcher.watch(&key_path, RecursiveMode::NonRecursive) {
+        error!("Failed to watch key file: {e}");
+        return Ok(());
+    }
+
+    info!(
+        "Started watching for certificate changes at: {:?} and {:?}",
+        cert_path, key_path
+    );
+
+    while rx.recv().await.is_some() {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        info!("Detected change in certificate/key files. Attempting to reload.");
+        match load_tls_config(domain) {
+            Ok(new_config) => {
+                let mut config_writer = tls_config.write().map_err(|e| AppError(e.to_string()))?;
+                *config_writer = new_config;
+                info!("Successfully reloaded TLS certificate.");
+            }
+            Err(e) => {
+                error!("Failed to reload TLS certificate: {e}. Keeping the old one.");
+            }
+        }
+    }
+    Ok(())
+}
+pub fn load_tls_config(domain: &str) -> Result<Arc<ServerConfig>, AppError> {
+    let cert_dir = get_domain_path(domain)?;
+    let cert_path = cert_dir.join("cert.pem");
+    let key_path = cert_dir.join("key.pem");
+
+    if cert_path.exists() && key_path.exists() {
+        info!(
+            "Found certificate for domain '{}' at '{}'",
+            domain,
+            cert_dir.display()
+        );
+
+        let cert_file = File::open(&cert_path).map_err(|e| {
+            AppError(format!(
+                "Failed to open cert file '{}': {}",
+                cert_path.display(),
+                e
+            ))
+        })?;
+        let mut cert_reader = BufReader::new(cert_file);
+
+        match rustls_pemfile::certs(&mut cert_reader).next() {
+            Some(Ok(cert_der)) => {
+                let cert = x509_parser::parse_x509_certificate(&cert_der)
+                    .map_err(|e| AppError(format!("Failed to parse certificate: {:?}", e)))?
+                    .1;
+
+                if cert.validity().is_valid() {
+                    info!("Certificate for '{}' is valid.", domain);
+
+                    let key_file = File::open(&key_path).map_err(|e| {
+                        AppError(format!(
+                            "Failed to open key file '{}': {}",
+                            key_path.display(),
+                            e
+                        ))
+                    })?;
+                    let mut key_reader = BufReader::new(key_file);
+
+                    let private_key = rustls_pemfile::private_key(&mut key_reader)
+                        .and_then(|key| {
+                            key.ok_or_else(|| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::NotFound,
+                                    "No private key found in pem file",
+                                )
+                                .into()
+                            })
+                        })
+                        .map_err(|e| AppError(format!("Failed to parse private key: {}", e)))?;
+
+                    let config = ServerConfig::builder()
+                        .with_no_client_auth()
+                        .with_single_cert(vec![cert_der], private_key)
+                        .map_err(|e| AppError(format!("Failed to create tls config: {}", e)))?;
+
+                    return Ok(Arc::new(config));
+                } else {
+                    warn!("Certificate for domain '{}' has expired or is not yet valid. Falling back to a self-signed certificate.", domain);
+                }
+            }
+            Some(Err(e)) => {
+                warn!("Failed to parse certificate file for '{}': {}. Falling back to a self-signed certificate.", domain, e);
+            }
+            None => {
+                warn!(
+                    "No certificates found in '{}'. Falling back to a self-signed certificate.",
+                    cert_path.display()
+                );
+            }
+        };
+    } else {
+        info!("Certificate not found for domain '{}' at path '{}', will generate a self-signed certificate.", domain, cert_dir.display());
+    }
+
+    create_self_signed_cert(domain)
 }

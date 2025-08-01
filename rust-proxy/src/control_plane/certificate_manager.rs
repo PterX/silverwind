@@ -130,7 +130,7 @@ impl CertificateManager {
                                                 remaining_days,
                                                 expiration_datetime.format(&Rfc2822).unwrap()
                                             );
-                                            true // 返回 true 表示有问题（即将过期）
+                                            true
                                         } else {
                                             info!(
                                                 "Certificate [{}] is valid for {} more days (Expiration date: {})",
@@ -138,7 +138,7 @@ impl CertificateManager {
             remaining_days,
             expiration_datetime.format(&Rfc2822).unwrap()
         );
-                                            false // 返回 false 表示状态良好
+                                            false
                                         }
                                     }
                                 }
