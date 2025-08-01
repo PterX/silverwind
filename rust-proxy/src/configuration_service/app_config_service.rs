@@ -67,10 +67,11 @@ pub async fn start_proxy(
                 .api_service_config
                 .get(&port)
                 .ok_or(app_error!(
-                    "HTTPS 服务在端口 {} 上缺少 'domains' 配置",
+                    "Missing 'domains' configuration for HTTPS service on port {}",
                     port
                 ))?
-                .domain_config.to_vec()
+                .domain_config
+                .to_vec()
         };
         http_proxy.start_https_server(domains).await
     } else if server_type == ServiceType::Tcp {
@@ -102,10 +103,11 @@ pub async fn start_proxy(
                 .api_service_config
                 .get(&port)
                 .ok_or(app_error!(
-                    "HTTPS 服务在端口 {} 上缺少 'domains' 配置",
+                    "Missing 'domains' configuration for HTTPS service on port {}",
                     port
                 ))?
-                .domain_config.to_vec()
+                .domain_config
+                .to_vec()
         };
         grpc_proxy.start_tls_proxy(domains).await
     }

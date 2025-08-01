@@ -106,6 +106,7 @@ fn reconfigure_logger(
         ("delay_timer", LevelFilter::OFF),
         ("hyper_util", LevelFilter::OFF),
         ("h2", LevelFilter::OFF),
+        ("rustls", LevelFilter::OFF),
     ];
 
     if !static_config.health_check_log_enabled.unwrap_or(false) {

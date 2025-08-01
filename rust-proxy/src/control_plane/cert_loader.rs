@@ -9,7 +9,6 @@ use rcgen::{CertificateParams, DistinguishedName};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, private_key};
-use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::PrivatePkcs8KeyDer;
 use std::fs;
 use std::fs::File;
@@ -93,44 +92,53 @@ fn find_cert_path(domain: &str) -> Result<(PathBuf, PathBuf), AppError> {
     Ok((cert_path, key_path))
 }
 
-fn create_self_signed_cert(domain: &str) -> Result<Arc<ServerConfig>, AppError> {
+fn create_self_signed_cert(domain: &str) -> Result<ServerConfig, AppError> {
     info!(
         "Generating self-signed certificate for domain '{}'...",
         domain
     );
     let mut params = CertificateParams::new(vec![domain.to_string()])?;
     params.distinguished_name = DistinguishedName::new();
-    let ca_key = KeyPair::generate()?;
-
-    let cert = params.self_signed(&ca_key)?;
-
+    let key_pair = KeyPair::generate()?;
+    let cert = params.self_signed(&key_pair)?;
     let cert_der = cert.der().clone();
     let pem = cert.pem();
-    let key_der = PrivatePkcs8KeyDer::from_pem_slice(pem.as_bytes())?;
+    let private_key_der_bytes = key_pair.serialize_der();
+    let pkcs8_key = PrivatePkcs8KeyDer::from(private_key_der_bytes);
+    let key_der = PrivateKeyDer::from(pkcs8_key);
     let cert_chain = vec![cert_der];
-
-    let key = PrivateKeyDer::Pkcs8(key_der);
-
     info!(
         "Successfully generated self-signed certificate for domain '{}'.",
         domain
     );
     let config = ServerConfig::builder()
         .with_no_client_auth()
-        .with_single_cert(cert_chain, key)
+        .with_single_cert(cert_chain, key_der)
         .map_err(|e| {
             AppError(format!(
                 "Failed to create tls config from self-signed cert: {e}"
             ))
         })?;
 
-    Ok(Arc::new(config))
+    Ok(config)
 }
-async fn watch_for_certificate_changes(
+pub async fn watch_for_certificate_changes(
     domain: &str,
-    tls_config: Arc<RwLock<Arc<rustls::ServerConfig>>>,
+    tls_config: Arc<RwLock<rustls::ServerConfig>>,
 ) -> Result<(), AppError> {
-    let cert_dir = get_domain_path(domain)?;
+    let cert_dir = match get_domain_path(domain) {
+        Ok(dir) => dir,
+        Err(e) => return Err(e),
+    };
+    if let Err(e) = tokio::fs::create_dir_all(&cert_dir).await {
+        error!(
+            "Failed to create certificate directory '{}': {}",
+            cert_dir.display(),
+            e
+        );
+        return Ok(());
+    }
+
     let cert_path = cert_dir.join("cert.pem");
     let key_path = cert_dir.join("key.pem");
     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
@@ -141,7 +149,12 @@ async fn watch_for_certificate_changes(
                 if matches!(
                     event.kind,
                     notify::EventKind::Modify(_) | notify::EventKind::Create(_)
-                ) {
+                ) && event
+                    .paths
+                    .iter()
+                    .any(|p| p == &cert_path || p == &key_path)
+                {
+                    info!("Certificate or key file change detected: {:?}", event.kind);
                     let _ = tx.blocking_send(());
                 }
             }
@@ -155,18 +168,18 @@ async fn watch_for_certificate_changes(
         }
     };
 
-    if let Err(e) = watcher.watch(&cert_path, RecursiveMode::NonRecursive) {
-        error!("Failed to watch certificate file: {e}");
-        return Ok(());
-    }
-    if let Err(e) = watcher.watch(&key_path, RecursiveMode::NonRecursive) {
-        error!("Failed to watch key file: {e}");
+    if let Err(e) = watcher.watch(&cert_dir, RecursiveMode::NonRecursive) {
+        error!(
+            "Failed to watch certificate directory at '{}': {}",
+            cert_dir.display(),
+            e
+        );
         return Ok(());
     }
 
     info!(
-        "Started watching for certificate changes at: {:?} and {:?}",
-        cert_path, key_path
+        "Started watching for certificate changes in directory: {:?}",
+        cert_dir
     );
 
     while rx.recv().await.is_some() {
@@ -186,7 +199,7 @@ async fn watch_for_certificate_changes(
     }
     Ok(())
 }
-pub fn load_tls_config(domain: &str) -> Result<Arc<ServerConfig>, AppError> {
+pub fn load_tls_config(domain: &str) -> Result<ServerConfig, AppError> {
     let cert_dir = get_domain_path(domain)?;
     let cert_path = cert_dir.join("cert.pem");
     let key_path = cert_dir.join("key.pem");
@@ -241,7 +254,7 @@ pub fn load_tls_config(domain: &str) -> Result<Arc<ServerConfig>, AppError> {
                         .with_single_cert(vec![cert_der], private_key)
                         .map_err(|e| AppError(format!("Failed to create tls config: {e}")))?;
 
-                    return Ok(Arc::new(config));
+                    return Ok(config);
                 } else {
                     warn!("Certificate for domain '{domain}' has expired or is not yet valid. Falling back to a self-signed certificate.");
                 }

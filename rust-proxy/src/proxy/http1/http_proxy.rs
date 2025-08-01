@@ -1,29 +1,32 @@
 use crate::control_plane::cert_loader::load_tls_config;
+use crate::control_plane::cert_loader::watch_for_certificate_changes;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::proxy::http1::app_clients::AppClients;
+use crate::proxy::http1::websocket_proxy::server_upgrade;
 use crate::proxy::proxy_trait::DestinationResult;
+use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
+use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::SharedConfig;
 use bytes::Bytes;
 use http::{HeaderValue, Uri};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::header;
 use hyper::header::{CONNECTION, SEC_WEBSOCKET_KEY};
-use hyper::Method;
-use hyper::StatusCode;
-
-use crate::proxy::http1::websocket_proxy::server_upgrade;
-use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
-use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
+use hyper::Method;
+use hyper::StatusCode;
 use hyper::{Request, Response};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
+use rustls::ServerConfig;
 use serde_json::json;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::SystemTime;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -91,16 +94,30 @@ impl HttpProxy {
         let tls_cfg = load_tls_config(domains.first().ok_or(AppError(
             "Cannot create certificate because the domains list is empty.".to_string(),
         ))?)?;
-
-        let tls_acceptor = TlsAcceptor::from(tls_cfg);
+        let shared_tls_config: Arc<RwLock<ServerConfig>> = Arc::new(RwLock::new(tls_cfg));
+        let watcher_config_clone = shared_tls_config.clone();
+        let domain_name = domains.first().ok_or(AppError(
+            "Cannot create certificate because the domains list is empty.".to_string(),
+        ))?;
+        let domain_to_watch = domain_name.to_string();
+        tokio::spawn(async move {
+            info!("Starting certificate watcher for domain: {domain_to_watch}");
+            if let Err(e) =
+                watch_for_certificate_changes(&domain_to_watch, watcher_config_clone).await
+            {
+                error!("Certificate watcher task for domain [{domain_to_watch}] has failed: {e}");
+            }
+        });
         let reveiver = &mut self.channel;
-
         let listener = TcpListener::bind(addr).await?;
-        info!("Listening on http://{addr}");
+        info!("Listening on https://{addr}");
         loop {
             tokio::select! {
                     Ok((tcp_stream,addr))= listener.accept()=>{
-                let tls_acceptor = tls_acceptor.clone();
+                        let tls_acceptor = {
+                            let config_guard = shared_tls_config.read().map_err(|e| AppError(format!("Failed to get read lock on TLS config: {e}")))?;
+                            TlsAcceptor::from(Arc::new(config_guard.clone()))
+                        };
                 let cloned_shared_config=self.shared_config.clone();
                 let cloned_port=self.port;
                 let client = client.clone();

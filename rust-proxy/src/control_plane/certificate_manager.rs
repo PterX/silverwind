@@ -40,7 +40,7 @@ impl CertificateManager {
 
             for domain_config in &service.domain_config {
                 info!("Discovered domain [{domain_config}], adding to the renewal check queue.");
-                domains_to_check.push((domain_config.clone(), service.sender.clone()));
+                domains_to_check.push(domain_config.clone());
             }
         }
 
@@ -56,7 +56,7 @@ impl CertificateManager {
                 timer.tick().await;
                 info!("Starting a new certificate renewal check cycle...");
 
-                for (domain_conf, reload_notifier) in &domains_to_check {
+                for domain_conf in &domains_to_check {
                     let domain_name = domain_conf;
                     info!("Performing renewal check for domain: [{domain_name}]");
 
@@ -66,9 +66,6 @@ impl CertificateManager {
                         match Self::renew_certificate(domain_name).await {
                             Ok(_) => {
                                 info!("Successfully renewed certificate for [{domain_name}].");
-                                if let Err(e) = reload_notifier.send(()).await {
-                                    error!("Failed to send reload signal for [{domain_name}]: {e}");
-                                }
                             }
                             Err(e) => {
                                 error!("Error renewing certificate for [{domain_name}]: {e:?}");
@@ -77,7 +74,6 @@ impl CertificateManager {
                     } else {
                         info!("Certificate for [{domain_name}] does not need renewal yet.");
                     }
-                    tokio::time::sleep(Duration::from_secs(5)).await;
                 }
                 info!("This certificate renewal check cycle is complete.");
             }

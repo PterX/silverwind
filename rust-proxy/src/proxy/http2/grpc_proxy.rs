@@ -1,6 +1,7 @@
 use crate::constants::common_constants::GRPC_STATUS_HEADER;
 use crate::constants::common_constants::GRPC_STATUS_OK;
 use crate::control_plane::cert_loader::load_tls_config;
+use crate::control_plane::cert_loader::watch_for_certificate_changes;
 use crate::proxy::proxy_trait::ChainTrait;
 use crate::proxy::proxy_trait::CommonCheckRequest;
 use crate::proxy::proxy_trait::SpireContext;
@@ -16,9 +17,11 @@ use http::{Method, Request};
 use hyper::body::Bytes;
 
 use crate::SharedConfig;
+use rustls::ServerConfig;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use std::sync::RwLock;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -145,19 +148,21 @@ impl GrpcProxy {
         let tls_cfg = load_tls_config(domains.first().ok_or(AppError(
             "Cannot create certificate because the domains list is empty.".to_string(),
         ))?)?;
-        // let mut cer_reader = BufReader::new(pem_str.as_bytes());
-        // // let certs = rustls_pemfile::certs(&mut cer_reader)
-        // //     .unwrap()
-        // //     .iter()
-        // //     .map(|s| rustls::Certificate((*s).clone()))
-        // //     .collect();
-        // let certs: Vec<CertificateDer<'_>> =
-        //     rustls_pemfile::certs(&mut cer_reader).collect::<Result<Vec<_>, _>>()?;
 
-        // let mut key_reader = BufReader::new(key_str.as_bytes());
-        // let key_der = rustls_pemfile::private_key(&mut key_reader)?.ok_or("key_der is none")?;
-
-        let tls_acceptor = TlsAcceptor::from(tls_cfg);
+        let shared_tls_config: Arc<RwLock<ServerConfig>> = Arc::new(RwLock::new(tls_cfg));
+        let watcher_config_clone = shared_tls_config.clone();
+        let domain_name = domains.first().ok_or(AppError(
+            "Cannot create certificate because the domains list is empty.".to_string(),
+        ))?;
+        let domain_to_watch = domain_name.to_string();
+        tokio::spawn(async move {
+            info!("Starting certificate watcher for domain: {domain_to_watch}");
+            if let Err(e) =
+                watch_for_certificate_changes(&domain_to_watch, watcher_config_clone).await
+            {
+                error!("Certificate watcher task for domain [{domain_to_watch}] has failed: {e}");
+            }
+        });
 
         info!("Listening on grpc with tls://{addr}");
         let listener = TcpListener::bind(addr).await?;
@@ -168,6 +173,10 @@ impl GrpcProxy {
             let accept_future = listener.accept();
             tokio::select! {
                accept_result=accept_future=>{
+                let tls_acceptor = {
+                    let config_guard = shared_tls_config.read().map_err(|e| AppError(format!("Failed to get read lock on TLS config: {e}")))?;
+                    TlsAcceptor::from(Arc::new(config_guard.clone()))
+                };
                 let cloned_port=self.port;
                 let cloned_config=self.shared_config.clone();
                 if let Ok((tcp_stream, peer_addr))=accept_result{
