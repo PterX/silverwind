@@ -6,8 +6,6 @@ use notify::RecursiveMode;
 use notify::Watcher;
 use rcgen::KeyPair;
 use rcgen::{CertificateParams, DistinguishedName};
-use rustls::crypto::ring;
-use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use rustls_pemfile::{certs, private_key};
@@ -107,28 +105,20 @@ fn create_self_signed_cert(domain: &str) -> Result<ServerConfig, AppError> {
     let pem = cert.pem();
     let private_key_der_bytes = key_pair.serialize_der();
     let pkcs8_key = PrivatePkcs8KeyDer::from(private_key_der_bytes);
-    let key_der = PrivateKeyDer::from(pkcs8_key);
-    let cert_chain = vec![cert_der];
+    let private_key = PrivateKeyDer::from(pkcs8_key);
+    // let cert_der = vec![cert_der];
     info!(
         "Successfully generated self-signed certificate for domain '{}'.",
         domain
     );
 
-    let config = ServerConfig::builder_with_provider(
-        CryptoProvider {
-            cipher_suites: Vec::default(),
-            ..ring::default_provider()
-        }
-        .into(),
-    )
-    .with_safe_default_protocol_versions()?
+    let config = ServerConfig::builder_with_protocol_versions(&[
+        &rustls::version::TLS13,
+        &rustls::version::TLS12,
+    ])
     .with_no_client_auth()
-    .with_single_cert(cert_chain, key_der)
-    .map_err(|e| {
-        AppError(format!(
-            "Failed to create tls config from self-signed cert: {e}"
-        ))
-    })?;
+    .with_single_cert(vec![cert_der], private_key)
+    .map_err(|e| AppError(format!("Failed to create tls config: {e}")))?;
 
     Ok(config)
 }
@@ -230,13 +220,13 @@ pub fn load_tls_config(domain: &str) -> Result<ServerConfig, AppError> {
         })?;
         let mut cert_reader = BufReader::new(cert_file);
 
-        match rustls_pemfile::certs(&mut cert_reader).next() {
-            Some(Ok(cert_der)) => {
-                let cert = x509_parser::parse_x509_certificate(&cert_der)
+        match rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>() {
+            Ok(certs) if !certs.is_empty() => {
+                let first_cert = x509_parser::parse_x509_certificate(&certs[0])
                     .map_err(|e| AppError(format!("Failed to parse certificate: {e:?}")))?
                     .1;
 
-                if cert.validity().is_valid() {
+                if first_cert.validity().is_valid() {
                     info!("Certificate for '{}' is valid.", domain);
 
                     let key_file = File::open(&key_path).map_err(|e| {
@@ -248,27 +238,15 @@ pub fn load_tls_config(domain: &str) -> Result<ServerConfig, AppError> {
                     })?;
                     let mut key_reader = BufReader::new(key_file);
 
-                    let private_key = rustls_pemfile::private_key(&mut key_reader)
-                        .and_then(|key| {
-                            key.ok_or_else(|| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::NotFound,
-                                    "No private key found in pem file",
-                                )
-                            })
-                        })
-                        .map_err(|e| AppError(format!("Failed to parse private key: {e}")))?;
+                    let private_key = rustls_pemfile::private_key(&mut key_reader)?
+                        .ok_or(AppError("Failed to parse private key:".to_string()))?;
 
-                    let config = ServerConfig::builder_with_provider(
-                        CryptoProvider {
-                            cipher_suites: Vec::default(),
-                            ..ring::default_provider()
-                        }
-                        .into(),
-                    )
-                    .with_safe_default_protocol_versions()?
+                    let config = ServerConfig::builder_with_protocol_versions(&[
+                        &rustls::version::TLS13,
+                        &rustls::version::TLS12,
+                    ])
                     .with_no_client_auth()
-                    .with_single_cert(vec![cert_der], private_key)
+                    .with_single_cert(certs, private_key)
                     .map_err(|e| AppError(format!("Failed to create tls config: {e}")))?;
 
                     return Ok(config);
@@ -276,14 +254,15 @@ pub fn load_tls_config(domain: &str) -> Result<ServerConfig, AppError> {
                     warn!("Certificate for domain '{domain}' has expired or is not yet valid. Falling back to a self-signed certificate.");
                 }
             }
-            Some(Err(e)) => {
-                warn!("Failed to parse certificate file for '{domain}': {e}. Falling back to a self-signed certificate.");
-            }
-            None => {
+            Ok(_) => {
                 warn!(
                     "No certificates found in '{}'. Falling back to a self-signed certificate.",
                     cert_path.display()
                 );
+            }
+            Err(e) => {
+                // An error occurred reading the certs
+                warn!("Failed to parse certificate file for '{domain}': {e}. Falling back to a self-signed certificate.");
             }
         };
     } else {

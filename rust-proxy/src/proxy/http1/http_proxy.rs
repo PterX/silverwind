@@ -116,6 +116,7 @@ impl HttpProxy {
                     Ok((tcp_stream,addr))= listener.accept()=>{
                         let tls_acceptor = {
                             let config_guard = shared_tls_config.read().map_err(|e| AppError(format!("Failed to get read lock on TLS config: {e}")))?;
+                            info!("config_guard is {config_guard:?}");
                             TlsAcceptor::from(Arc::new(config_guard.clone()))
                         };
                 let cloned_shared_config=self.shared_config.clone();

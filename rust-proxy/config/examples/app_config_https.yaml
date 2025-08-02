@@ -1,9 +1,9 @@
-log_level: info
+log_level: trace
 servers:
-  - listen: 443
+  - listen: 8443
     protocol: https
     domains:
-      - www.baidu.com
+      - www.937453.xyz
     routes:
       - matchers:
           - kind: path

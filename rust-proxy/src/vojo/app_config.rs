@@ -264,6 +264,8 @@ impl AppConfig {
             Some(LogLevel::Info) => LevelFilter::INFO,
             Some(LogLevel::Error) => LevelFilter::ERROR,
             Some(LogLevel::Warn) => LevelFilter::WARN,
+            Some(LogLevel::Trace) => LevelFilter::TRACE,
+
             None => LevelFilter::OFF,
         }
     }
@@ -278,6 +280,8 @@ pub enum LogLevel {
     Error,
     #[serde(rename = "warn")]
     Warn,
+    #[serde(rename = "trace")]
+    Trace,
 }
 
 #[cfg(test)]
