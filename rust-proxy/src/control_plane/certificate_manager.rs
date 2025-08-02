@@ -50,7 +50,7 @@ impl CertificateManager {
         }
 
         let handle = tokio::spawn(async move {
-            let mut timer = interval(Duration::from_secs(20));
+            let mut timer = interval(Duration::from_secs(3600 * 24));
 
             loop {
                 timer.tick().await;
