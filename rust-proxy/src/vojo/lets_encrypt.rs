@@ -3,13 +3,12 @@ use crate::app_error;
 use crate::control_plane::lets_encrypt::LetsEncryptActions;
 use axum::extract::State;
 use axum::{extract::Path, http::StatusCode, routing::any, Router};
-use instant_acme::Authorizations;
-use instant_acme::LetsEncrypt;
-use instant_acme::NewAccount;
 use instant_acme::RetryPolicy;
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, NewOrder, OrderStatus,
 };
+use instant_acme::Authorizations;
+use instant_acme::{LetsEncrypt, NewAccount};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -157,6 +156,7 @@ async fn local_account() -> Result<Account, AppError> {
     info!("installing ring done");
 
     info!("creating test account");
+
     let account_builder = Account::builder()?;
     let (account, _) = account_builder
         .create(

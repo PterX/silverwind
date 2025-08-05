@@ -1,4 +1,3 @@
-use crate::app_error;
 use crate::utils::fs_utils::get_domain_path;
 use crate::vojo::app_error::AppError;
 use notify::RecommendedWatcher;
@@ -6,91 +5,15 @@ use notify::RecursiveMode;
 use notify::Watcher;
 use rcgen::KeyPair;
 use rcgen::{CertificateParams, DistinguishedName};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::pki_types::PrivateKeyDer;
 use rustls::ServerConfig;
-use rustls_pemfile::{certs, private_key};
 use rustls_pki_types::PrivatePkcs8KeyDer;
-use std::fs;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
 use tracing::info;
-
-pub struct TlsCert {
-    pub cert: Vec<CertificateDer<'static>>,
-    pub key: PrivateKeyDer<'static>,
-}
-
-// pub fn load_or_create_cert(domain: &str) -> Result<TlsCert, AppError> {
-//     if let Ok((cert_path, key_path)) = find_cert_path(domain) {
-//         if cert_path.exists() && key_path.exists() {
-//             info!(
-//                 "Loading certificate for domain '{}', path: {}",
-//                 domain,
-//                 cert_path.display()
-//             );
-//             return load_cert_from_path(&cert_path, &key_path);
-//         }
-//     }
-
-//     info!(
-//         "Certificate not found for domain '{}' at expected path, will generate a self-signed certificate.",
-//         domain
-//     );
-//     create_self_signed_cert(domain)
-// }
-
-fn load_cert_from_path(cert_path: &Path, key_path: &Path) -> Result<TlsCert, AppError> {
-    let cert_file = fs::File::open(cert_path).map_err(|e| {
-        app_error!(
-            "Failed to open certificate file '{}': {}",
-            cert_path.display(),
-            e
-        )
-    })?;
-    let mut cert_reader = BufReader::new(cert_file);
-    let certs: Vec<CertificateDer> =
-        certs(&mut cert_reader)
-            .collect::<Result<_, _>>()
-            .map_err(|e| {
-                app_error!(
-                    "Failed to parse certificate file '{}': {}",
-                    cert_path.display(),
-                    e
-                )
-            })?;
-
-    let key_file = fs::File::open(key_path).map_err(|e| {
-        app_error!(
-            "Failed to open private key file '{}': {}",
-            key_path.display(),
-            e
-        )
-    })?;
-    let mut key_reader = BufReader::new(key_file);
-
-    let key = private_key(&mut key_reader)
-        .map_err(|e| {
-            app_error!(
-                "Failed to parse private key file '{}': {}",
-                key_path.display(),
-                e
-            )
-        })?
-        .ok_or_else(|| app_error!("No PKCS8/RSA private key found in '{}'", key_path.display()))?;
-
-    Ok(TlsCert { cert: certs, key })
-}
-
-fn find_cert_path(domain: &str) -> Result<(PathBuf, PathBuf), AppError> {
-    let base_path = get_domain_path(domain)?;
-    let cert_path = base_path.join("cert.pem");
-    let key_path = base_path.join("key.pem");
-    Ok((cert_path, key_path))
-}
 
 fn create_self_signed_cert(domain: &str) -> Result<ServerConfig, AppError> {
     info!(
