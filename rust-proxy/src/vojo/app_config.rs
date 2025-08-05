@@ -23,6 +23,8 @@ use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub acme: AcmeConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_check_log_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,6 +38,7 @@ pub struct AppConfig {
     )]
     pub api_service_config: HashMap<i32, ApiService>,
 }
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -43,6 +46,7 @@ impl Default for AppConfig {
             admin_port: Some(DEFAULT_ADMIN_PORT),
             log_level: None,
             api_service_config: Default::default(),
+            acme: AcmeConfig::default(),
         }
     }
 }
@@ -205,6 +209,18 @@ pub struct ApiService {
     #[serde(skip_deserializing, skip_serializing)]
     pub sender: mpsc::Sender<()>,
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "PascalCase")]
+pub enum AcmeConfig {
+    #[default]
+    LetsEncrypt,
+    #[serde(rename = "zerossl")]
+    ZeroSsl {
+        eab_kid: String,
+        eab_hmac_key: String,
+    },
+}
+
 impl<'de> Deserialize<'de> for ApiService {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -216,6 +232,7 @@ impl<'de> Deserialize<'de> for ApiService {
             port: i32,
             #[serde(rename = "protocol")]
             pub server_type: ServiceType,
+
             #[serde(rename = "domains")]
             #[serde(default)]
             pub domain_config: Vec<String>,
@@ -251,7 +268,6 @@ impl Default for ApiService {
             server_type: Default::default(),
             domain_config: Default::default(),
             route_configs: Default::default(),
-
             sender,
         }
     }

@@ -1,13 +1,16 @@
 use super::app_error::AppError;
 use crate::app_error;
 use crate::control_plane::lets_encrypt::LetsEncryptActions;
+use crate::vojo::app_config::AcmeConfig;
 use axum::extract::State;
 use axum::{extract::Path, http::StatusCode, routing::any, Router};
+use base64::engine::general_purpose;
+use base64::Engine;
 use instant_acme::RetryPolicy;
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, NewOrder, OrderStatus,
 };
-use instant_acme::Authorizations;
+use instant_acme::{Authorizations, ExternalAccountKey, ZeroSsl};
 use instant_acme::{LetsEncrypt, NewAccount};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -81,8 +84,8 @@ impl LetsEntrypt {
     }
 }
 impl LetsEncryptActions for LetsEntrypt {
-    async fn start_request2(&self) -> Result<(String, String), AppError> {
-        let account = local_account().await?;
+    async fn obtain_certificate(&self, acme: &AcmeConfig) -> Result<(String, String), AppError> {
+        let account = local_account(acme).await?;
         info!("Account created successfully.");
         let identifiers = [Identifier::Dns(self.domain_name.clone())];
         let mut order = account.new_order(&NewOrder::new(&identifiers)).await?;
@@ -150,12 +153,34 @@ pub fn acme_router(challenges: HashMap<String, String>) -> Router {
         .with_state(challenges)
 }
 use rustls::crypto::ring;
-async fn local_account() -> Result<Account, AppError> {
+async fn local_account(acme: &AcmeConfig) -> Result<Account, AppError> {
     info!("installing ring");
     let _ = ring::default_provider().install_default();
     info!("installing ring done");
 
     info!("creating test account");
+
+    let (dir, external_account) = match acme {
+        AcmeConfig::LetsEncrypt => (LetsEncrypt::Production.url().to_owned(), None),
+        AcmeConfig::ZeroSsl {
+            eab_kid,
+            eab_hmac_key,
+        } => {
+            let hmac_key_bytes = general_purpose::URL_SAFE_NO_PAD
+                .decode(eab_hmac_key)
+                .map_err(|e| {
+                    app_error!(
+                        "Invalid ZeroSSL HMAC key for key_id '{}': not valid base64url. Error: {}",
+                        eab_kid,
+                        e
+                    )
+                })?;
+
+            let eab_key = ExternalAccountKey::new(eab_kid.clone(), &hmac_key_bytes);
+            (ZeroSsl::Production.url().to_owned(), Some(eab_key))
+        }
+    };
+    info!("ACME Directory URL: {dir:?}",);
 
     let account_builder = Account::builder()?;
     let (account, _) = account_builder
@@ -165,8 +190,8 @@ async fn local_account() -> Result<Account, AppError> {
                 terms_of_service_agreed: true,
                 only_return_existing: false,
             },
-            LetsEncrypt::Production.url().to_owned(),
-            None,
+            dir,
+            external_account.as_ref(),
         )
         .await?;
     Ok(account)
@@ -248,7 +273,9 @@ mod tests {
             domain_name: test_domain,
         };
 
-        let result = le_request.start_request2().await;
+        let result = le_request
+            .obtain_certificate(&AcmeConfig::LetsEncrypt)
+            .await;
 
         assert!(
             result.is_err(),

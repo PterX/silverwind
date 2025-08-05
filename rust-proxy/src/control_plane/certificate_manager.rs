@@ -1,6 +1,6 @@
 use crate::control_plane::lets_encrypt::LetsEncryptActions;
 use crate::utils::fs_utils::get_domain_path;
-use crate::vojo::app_config::{AppConfig, ServiceType};
+use crate::vojo::app_config::{AcmeConfig, AppConfig, ServiceType};
 use crate::vojo::lets_encrypt::LetsEntrypt;
 use crate::{app_error, AppError};
 use log::{error, info};
@@ -48,6 +48,7 @@ impl CertificateManager {
             info!("No domains configured for renewal.");
             return;
         }
+        let global_acme_config = self.config.acme.clone();
 
         let handle = tokio::spawn(async move {
             let mut timer = interval(Duration::from_secs(30));
@@ -63,7 +64,7 @@ impl CertificateManager {
                     if Self::needs_renewal(domain_name).await {
                         info!("Certificate for [{domain_name}] needs renewal, attempting...");
 
-                        match Self::renew_certificate(domain_name).await {
+                        match Self::renew_certificate(domain_name, &global_acme_config).await {
                             Ok(_) => {
                                 info!("Successfully renewed certificate for [{domain_name}].");
                             }
@@ -183,7 +184,7 @@ impl CertificateManager {
         result
     }
 
-    async fn renew_certificate(domain_config: &String) -> Result<(), AppError> {
+    async fn renew_certificate(domain_config: &String, acme: &AcmeConfig) -> Result<(), AppError> {
         let domain_name = domain_config;
         if domain_name.is_empty() {
             return Err(app_error!("Renewal failed: domain name is empty."));
@@ -210,7 +211,7 @@ impl CertificateManager {
         info!(
             " - Performing ACME challenge and requesting certificate for domain [{domain_name}]..."
         );
-        let (key_pem, cert_pem) = lets_entrypt.start_request2().await?;
+        let (key_pem, cert_pem) = lets_entrypt.obtain_certificate(acme).await?;
         info!(" - Successfully obtained certificate and private key.");
 
         info!(" - Saving new certificate to: {cert_path:?}");

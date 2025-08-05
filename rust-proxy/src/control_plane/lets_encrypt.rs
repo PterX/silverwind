@@ -1,3 +1,4 @@
+use crate::vojo::app_config::AcmeConfig;
 use crate::vojo::lets_encrypt::LetsEntrypt;
 use crate::vojo::{app_error::AppError, base_response::BaseResponse};
 use crate::SharedConfig;
@@ -14,12 +15,14 @@ struct LetsEncryptResponse {
 }
 #[automock]
 pub trait LetsEncryptActions: Send + Sync {
-    async fn start_request2(&self) -> Result<(String, String), AppError>;
+    async fn obtain_certificate(&self, acme: &AcmeConfig) -> Result<(String, String), AppError>;
 }
 pub async fn lets_encrypt_certificate_logic<LEO: LetsEncryptActions>(
     lets_encrypt_object: LEO,
 ) -> Result<impl IntoResponse, AppError> {
-    let certificate_response = lets_encrypt_object.start_request2().await?;
+    let certificate_response = lets_encrypt_object
+        .obtain_certificate(&AcmeConfig::LetsEncrypt)
+        .await?;
     let data = BaseResponse {
         response_code: 0,
         response_object: certificate_response,
@@ -45,9 +48,9 @@ mod tests {
     async fn test_lets_encrypt_certificate_success() {
         let mut mock_le_actions = MockLetsEncryptActions::new();
         mock_le_actions
-            .expect_start_request2()
+            .expect_obtain_certificate()
             .times(1)
-            .returning(|| Ok(("a".to_string(), "mock_certificate_content".to_string())));
+            .returning(|_| Ok(("a".to_string(), "mock_certificate_content".to_string())));
         let response = lets_encrypt_certificate_logic(mock_le_actions)
             .await
             .unwrap();
@@ -64,9 +67,9 @@ mod tests {
     async fn test_lets_encrypt_certificat_error() {
         let mut mock_le_actions = MockLetsEncryptActions::new();
         mock_le_actions
-            .expect_start_request2()
+            .expect_obtain_certificate()
             .times(1)
-            .returning(|| Err(AppError("mock_certificate_content".to_string())));
+            .returning(|_| Err(AppError("mock_certificate_content".to_string())));
         let response = lets_encrypt_certificate_logic(mock_le_actions).await;
 
         let res = response.into_response();
