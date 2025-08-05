@@ -1,5 +1,5 @@
 use crate::constants::common_constants::DEFAULT_TEMPORARY_DIR;
-use crate::control_plane::lets_encrypt::lets_encrypt_certificate;
+use crate::control_plane::certificate_api::lets_encrypt_certificate;
 use crate::vojo::app_config::ApiService;
 use crate::vojo::app_config::AppConfig;
 use crate::vojo::app_config::RouteConfig;
