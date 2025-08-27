@@ -32,7 +32,7 @@ pub async fn init(shared_config: SharedConfig) -> Result<(), AppError> {
             if let Err(err) =
                 start_proxy(cloned_config, port, receiver, server_type, mapping_key).await
             {
-                error!("{err}");
+                error!("init error:error is [{err}]");
             }
         });
     }
