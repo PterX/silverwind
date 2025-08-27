@@ -1,12 +1,11 @@
-log_level: info
+log_level: debug
 servers:
   - listen: 8084
     protocol: http
     routes:
-      - route_id: test_route
-        matchers:
+      - matchers:
           - kind: path
-            value: /api/v1
+            value: /
         forward_to:
           kind: file
           doc_root: D:\
@@ -14,3 +13,11 @@ servers:
           - kind: rewrite_headers
             expires: 24h
             extensions: [js, css, html, png, jpg, gif]
+      - matchers:
+          - kind: path
+            value: /api
+        forward_to: http://127.0.0.1:8835
+      - matchers:
+          - kind: path
+            value: /auth
+        forward_to: http://127.0.0.1:8835
