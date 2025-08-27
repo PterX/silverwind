@@ -1,7 +1,6 @@
 use hyper::body::Incoming;
 use tokio::io;
 
-use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
 use crate::proxy::http1::http_client::HttpClients;
 use crate::vojo::app_error::AppError;
 use base64::{engine::general_purpose, Engine as _};
@@ -77,9 +76,9 @@ pub async fn server_upgrade(
     debug!("The new request is:{new_request:?}");
 
     let request_future = if new_request.uri().to_string().contains("https") {
-        http_client.request_https(new_request, DEFAULT_HTTP_TIMEOUT)
+        http_client.request_https(new_request, 5000)
     } else {
-        http_client.request_http(new_request, DEFAULT_HTTP_TIMEOUT)
+        http_client.request_http(new_request, 5000)
     };
     let outbound_res = match request_future.await {
         Ok(response) => response.map_err(AppError::from),

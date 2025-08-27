@@ -31,6 +31,8 @@ pub struct AppConfig {
     pub admin_port: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_timeout_secs: Option<i32>,
     #[serde(
         rename = "servers",
         deserialize_with = "deserialize_service_config",
@@ -47,6 +49,7 @@ impl Default for AppConfig {
             log_level: None,
             api_service_config: Default::default(),
             acme: AcmeConfig::default(),
+            upstream_timeout_secs: Some(5000),
         }
     }
 }

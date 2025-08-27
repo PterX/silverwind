@@ -1,4 +1,3 @@
-use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
 use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::middlewares::Denial;
 use crate::middleware::middlewares::MiddleWares;
@@ -129,6 +128,9 @@ impl ChainTrait for CommonCheckRequest {
             .ok_or(AppError::from("Path is empty"))?
             .as_str();
         let mut app_config = shared_config.shared_data.lock()?;
+        let request_timeout_sec = app_config.upstream_timeout_secs.ok_or(AppError::from(
+            "Can not find request_timeout_sec  from app config.",
+        ))?;
         let api_service = app_config
             .api_service_config
             .get_mut(&port)
@@ -177,7 +179,7 @@ impl ChainTrait for CommonCheckRequest {
                 .timeout
                 .clone()
                 .unwrap_or(TimeoutConfig {
-                    request_timeout: DEFAULT_HTTP_TIMEOUT,
+                    request_timeout: request_timeout_sec as u64,
                 })
                 .request_timeout;
 
