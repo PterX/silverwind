@@ -1,112 +1,114 @@
-use hyper::body::Incoming;
 use tokio::io;
 
 use crate::proxy::http1::http_client::HttpClients;
 use crate::vojo::app_error::AppError;
-use base64::{engine::general_purpose, Engine as _};
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
-use hyper::header::{HeaderValue, CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, UPGRADE};
+use hyper::upgrade::OnUpgrade;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use sha1::{Digest, Sha1};
+use sha1::Digest;
 use tokio::io::AsyncWriteExt;
 
 use crate::proxy::proxy_trait::HandlingResult;
-async fn server_upgraded_io(
-    inbound_req: Request<BoxBody<Bytes, AppError>>,
-    outbound_res: Response<Incoming>,
-) -> Result<(), AppError> {
-    let upgraded_inbound = hyper::upgrade::on(inbound_req).await?;
-    let inbound = TokioIo::new(upgraded_inbound);
+async fn proxy_websocket_connection(
+    client_upgrade_fut: OnUpgrade,
+    upstream_upgrade_fut: OnUpgrade,
+) {
+    match tokio::try_join!(client_upgrade_fut, upstream_upgrade_fut) {
+        Ok((client_upgraded, upstream_upgraded)) => {
+            let client_io = TokioIo::new(client_upgraded);
+            let upstream_io = TokioIo::new(upstream_upgraded);
 
-    let upgraded_outbound = hyper::upgrade::on(outbound_res).await?;
-    let outbound = TokioIo::new(upgraded_outbound);
+            let (mut client_reader, mut client_writer) = io::split(client_io);
+            let (mut upstream_reader, mut upstream_writer) = io::split(upstream_io);
 
-    let (mut ri, mut wi) = tokio::io::split(inbound);
-    let (mut ro, mut wo) = tokio::io::split(outbound);
-    let client_to_server = async {
-        io::copy(&mut ri, &mut wo).await?;
-        wo.shutdown().await
-    };
+            let client_to_upstream = async {
+                io::copy(&mut client_reader, &mut upstream_writer).await?;
+                upstream_writer.shutdown().await
+            };
 
-    let server_to_client = async {
-        io::copy(&mut ro, &mut wi).await?;
-        wi.shutdown().await
-    };
+            let upstream_to_client = async {
+                io::copy(&mut upstream_reader, &mut client_writer).await?;
+                client_writer.shutdown().await
+            };
 
-    let result = tokio::try_join!(client_to_server, server_to_client);
-
-    if result.is_err() {
-        error!("Copy stream error!");
+            if let Err(e) = tokio::try_join!(client_to_upstream, upstream_to_client) {
+                warn!("Error during WebSocket data proxying: {}", e);
+            }
+            debug!("WebSocket proxy connection closed successfully.");
+        }
+        Err(e) => {
+            error!("WebSocket upgrade failed: {}", e);
+        }
     }
-
-    Ok(())
 }
-pub async fn server_upgrade(
-    req: Request<BoxBody<Bytes, AppError>>,
+
+pub async fn server_upgrade<B>(
+    req: Request<B>,
     check_result: HandlingResult,
     http_client: HttpClients,
-) -> Result<Response<BoxBody<Bytes, AppError>>, AppError> {
-    debug!("The source request:{req:?}.");
-    let mut res = Response::new(Full::new(Bytes::new()).map_err(AppError::from).boxed());
-    if !req.headers().contains_key(UPGRADE) {
+) -> Result<Response<BoxBody<Bytes, AppError>>, AppError>
+where
+    B: http_body::Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<AppError>,
+{
+    debug!("Attempting to upgrade request: {:?}", req.headers());
+
+    if !req.headers().contains_key(hyper::header::UPGRADE) {
+        let mut res = Response::new(Full::new(Bytes::new()).map_err(AppError::from).boxed());
         *res.status_mut() = StatusCode::BAD_REQUEST;
         return Ok(res);
     }
+    let headers_clone = req.headers().clone(); // 假设 HandlingResult 已经包含了头信息
+    let method_clone = req.method().clone(); // 假设 HandlingResult 包含了方法
 
-    let header_map = req.headers().clone();
-    let upgrade_value = header_map.get(UPGRADE).ok_or("Update header is none")?;
-    let sec_websocke_key = header_map
-        .get(SEC_WEBSOCKET_KEY)
-        .ok_or(AppError::from("Can not get the websocket key!"))?
-        .to_str()?
-        .to_string();
+    let client_upgrade_fut = hyper::upgrade::on(req);
 
-    let request_path = check_result.request_path;
-    let mut new_request = Request::builder()
-        .method(req.method().clone())
+    let request_path = check_result.request_path.clone();
+
+    let mut upstream_req = Request::builder()
+        .method(method_clone)
         .uri(request_path.clone())
         .body(Full::new(Bytes::new()).map_err(AppError::from).boxed())?;
+    *upstream_req.headers_mut() = headers_clone.clone();
 
-    let new_header = new_request.headers_mut();
-    header_map.iter().for_each(|(key, value)| {
-        new_header.insert(key, value.clone());
-    });
-    debug!("The new request is:{new_request:?}");
+    debug!("Forwarding upgrade request to upstream: {:?}", upstream_req);
 
-    let request_future = if new_request.uri().to_string().contains("https") {
-        http_client.request_https(new_request, 5000)
+    let request_future = if upstream_req.uri().to_string().starts_with("https") {
+        http_client.request_https(upstream_req, 5000)
     } else {
-        http_client.request_http(new_request, 5000)
+        http_client.request_http(upstream_req, 5000)
     };
-    let outbound_res = match request_future.await {
+
+    let upstream_res = match request_future.await {
         Ok(response) => response.map_err(AppError::from),
         Err(_) => Err(AppError(format!(
-            "Request time out,the uri is {request_path}"
+            "Request to upstream timed out, uri is {request_path}"
         ))),
     }?;
-    if outbound_res.status() != StatusCode::SWITCHING_PROTOCOLS {
-        return Err(AppError::from("Request error!"));
+
+    if upstream_res.status() != StatusCode::SWITCHING_PROTOCOLS {
+        warn!(
+            "Upstream server rejected upgrade with status: {}",
+            upstream_res.status()
+        );
+        let (parts, body) = upstream_res.into_parts();
+        let boxed_body = body.map_err(AppError::from).boxed();
+        return Ok(Response::from_parts(parts, boxed_body));
     }
-    tokio::task::spawn(async move {
-        let res = server_upgraded_io(req, outbound_res).await;
-        if let Err(err) = res {
-            error!("{err}");
-        }
+
+    let response_headers_clone = upstream_res.headers().clone();
+    let upstream_upgrade_fut = hyper::upgrade::on(upstream_res);
+
+    tokio::spawn(async move {
+        proxy_websocket_connection(client_upgrade_fut, upstream_upgrade_fut).await;
     });
-    let web_socket_value = format!("{sec_websocke_key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-    let mut hasher = Sha1::new();
-    hasher.update(web_socket_value);
-    let result = hasher.finalize();
-    let encoded: String = general_purpose::STANDARD.encode(result);
-    *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
-    res.headers_mut().insert(UPGRADE, upgrade_value.clone());
-    res.headers_mut().insert(
-        SEC_WEBSOCKET_ACCEPT,
-        HeaderValue::from_str(encoded.as_str())?,
-    );
-    res.headers_mut()
-        .insert(CONNECTION, HeaderValue::from_str("Upgrade")?);
-    Ok(res)
+
+    let mut client_res = Response::new(Full::new(Bytes::new()).map_err(AppError::from).boxed());
+    *client_res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+    *client_res.headers_mut() = response_headers_clone; // 使用克隆的头信息
+
+    debug!("Returning 101 Switching Protocols to client.");
+    Ok(client_res)
 }

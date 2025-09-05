@@ -69,7 +69,7 @@ impl HttpProxy {
                                 });
                                 proxy_adapter(cloned_port,cloned_shared_config.clone(),client_cloned.clone(), req, mapping_key2.clone(), addr)
                             }),
-                        )
+                        ).with_upgrades()
                         .await
                     {
                         error!("Error serving connection: {err:?}");
@@ -138,7 +138,7 @@ impl HttpProxy {
 
                         proxy_adapter(cloned_port,cloned_shared_config.clone(),client.clone(), req, mapping_key2.clone(), addr)
                     });
-                    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+                    if let Err(err) = http1::Builder::new().serve_connection(io, service).with_upgrades().await {
                         error!("Error serving connection: {err:?}");
                     }
                 });
