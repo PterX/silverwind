@@ -71,13 +71,15 @@ impl LetsEntrypt {
         let listener = tokio::net::TcpListener::bind("0.0.0.0:80").await?;
 
         let server_handle = tokio::task::spawn(async move {
-            axum::serve(listener, acme_router)
+            let res = axum::serve(listener, acme_router)
                 .with_graceful_shutdown(async {
                     let _ = shutdown_rx.await;
                     info!("Gracefully shutting down ACME challenge server.");
                 })
-                .await
-                .unwrap();
+                .await;
+            if let Err(e) = res {
+                error!("error is {}", e);
+            }
         });
 
         Ok((shutdown_tx, server_handle))

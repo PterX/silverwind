@@ -110,9 +110,9 @@ impl CertificateManager {
 
                                     if now > expiration_datetime {
                                         error!(
-                                            "Certificate [{}] expired on {}.",
+                                            "Certificate [{}] expired on {:?}.",
                                             cert_path.display(),
-                                            expiration_datetime.format(&Rfc2822).unwrap()
+                                            expiration_datetime.format(&Rfc2822)
                                         );
                                         true
                                     } else {
@@ -123,18 +123,18 @@ impl CertificateManager {
 
                                         if remaining_days < EXPIRATION_THRESHOLD_DAYS {
                                             warn!(
-                                                "Certificate [{}] will expire in {} days (Expiration date: {})",
+                                                "Certificate [{}] will expire in {} days (Expiration date: {:?})",
                                                 cert_path.display(),
                                                 remaining_days,
-                                                expiration_datetime.format(&Rfc2822).unwrap()
+                                                expiration_datetime.format(&Rfc2822)
                                             );
                                             true
                                         } else {
                                             info!(
-                                                "Certificate [{}] is valid for {} more days (Expiration date: {})",
+                                                "Certificate [{}] is valid for {} more days (Expiration date: {:?})",
                                                 cert_path.display(),
             remaining_days,
-            expiration_datetime.format(&Rfc2822).unwrap()
+            expiration_datetime.format(&Rfc2822)
         );
                                             false
                                         }

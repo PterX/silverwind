@@ -29,8 +29,10 @@ mod arc_mutex_serde {
         S: Serializer,
         T: Serialize,
     {
-        let data = val.lock().unwrap();
-        T::serialize(&*data, s)
+        let guard = val.lock().map_err(|e| {
+            serde::ser::Error::custom(format!("Mutex poisoned during serialization: {}", e))
+        })?;
+        T::serialize(&*guard, s)
     }
     pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<Mutex<T>>, D::Error>
     where
@@ -65,8 +67,16 @@ impl PartialEq for MiddleWares {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::RateLimit(a), Self::RateLimit(b)) => {
-                let a_lock = a.lock().unwrap();
-                let b_lock = b.lock().unwrap();
+                let a_lock = match a.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return false,
+                };
+
+                let b_lock = match b.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return false,
+                };
+
                 *a_lock == *b_lock
             }
             (Self::Authentication(a), Self::Authentication(b)) => a == b,
@@ -75,8 +85,16 @@ impl PartialEq for MiddleWares {
             (Self::Headers(a), Self::Headers(b)) => a == b,
             (Self::ForwardHeader(a), Self::ForwardHeader(b)) => a == b,
             (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => {
-                let a_lock = a.lock().unwrap();
-                let b_lock = b.lock().unwrap();
+                let a_lock = match a.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return false,
+                };
+
+                let b_lock = match b.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return false,
+                };
+
                 *a_lock == *b_lock
             }
             (Self::RequestHeaders(a), Self::RequestHeaders(b)) => a == b,

@@ -200,7 +200,7 @@ async fn proxy_adapter_with_error(
         .with_label_values(&[mapping_key.as_str(), path.as_str(), method.as_str()])
         .start_timer();
 
-    let res = proxy(
+    let res = match proxy(
         port,
         shared_config,
         client,
@@ -210,21 +210,32 @@ async fn proxy_adapter_with_error(
         CommonCheckRequest {},
     )
     .await
-    .unwrap_or_else(|err| {
-        error!("The error is {err}.");
-        let json_value = json!({
-            "response_code": -1,
-            "response_object": format!("{}", err)
-        });
-        Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(
-                Full::new(Bytes::copy_from_slice(json_value.to_string().as_bytes()))
-                    .map_err(AppError::from)
-                    .boxed(),
-            )
-            .unwrap()
-    });
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            error!("The error is {err}.");
+            let json_value = json!({
+                "response_code": -1,
+                "response_object": err.to_string(),
+            });
+
+            let body = Full::new(Bytes::copy_from_slice(json_value.to_string().as_bytes()))
+                .map_err(AppError::from)
+                .boxed();
+
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(body)
+                .unwrap_or_else(|e| {
+                    error!("Failed to build response: {e}");
+                    Response::new(
+                        Full::new(Bytes::from_static(b"{\"response_code\":-1}"))
+                            .map_err(AppError::from)
+                            .boxed(),
+                    )
+                })
+        }
+    };
     timer.observe_duration();
     let status = res.status();
     metrics::HTTP_REQUESTS_TOTAL
