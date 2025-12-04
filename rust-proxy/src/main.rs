@@ -1,4 +1,5 @@
 use configuration_service::logger::setup_logger;
+use delay_timer::anyhow::anyhow;
 #[cfg(not(target_env = "msvc"))]
 use mimalloc::MiMalloc;
 
@@ -41,7 +42,8 @@ async fn main() -> Result<(), AppError> {
     let reload_handle = setup_logger()?;
     rustls::crypto::ring::default_provider()
         .install_default()
-        .expect("Failed to install rustls crypto provider");
+        .map_err(|e| AppError::from("Failed to install rustls crypto provider"))?;
+
     let cli = Cli::parse();
     info!("CLI arguments parsed: {cli:?}");
 
