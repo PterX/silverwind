@@ -9,6 +9,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 extern crate derive_builder;
 use crate::command::openapi_converter::handle_convert_command;
+use crate::monitor::prometheus_exporter::metrics;
 use crate::vojo::cli::Cli;
 mod configuration_service;
 mod constants;
@@ -80,7 +81,7 @@ async fn run_app(
     println!("Full configuration: {config:?}");
     reconfigure_logger(&reload_handle, &config);
     info!("Logger reconfigured to level: {}", config.get_log_level());
-
+    metrics::init().map_err(|e| AppError(e.to_string()))?;
     let admin_port = config.admin_port.unwrap_or(DEFAULT_ADMIN_PORT);
     let shared_config = SharedConfig::from_app_config(config);
 

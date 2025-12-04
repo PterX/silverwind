@@ -196,7 +196,10 @@ async fn proxy_adapter_with_error(
 
     let current_time = SystemTime::now();
 
-    let timer = metrics::HTTP_REQUEST_DURATION_SECONDS
+    let Some(s) = metrics::HTTP_REQUEST_DURATION_SECONDS.get() else {
+        return Err(AppError::from("HTTP_REQUEST_DURATION_SECONDS"));
+    };
+    let timer = s
         .with_label_values(&[mapping_key.as_str(), path.as_str(), method.as_str()])
         .start_timer();
 
@@ -238,14 +241,15 @@ async fn proxy_adapter_with_error(
     };
     timer.observe_duration();
     let status = res.status();
-    metrics::HTTP_REQUESTS_TOTAL
-        .with_label_values(&[
+    if let Some(s) = metrics::HTTP_REQUESTS_TOTAL.get() {
+        s.with_label_values(&[
             mapping_key.as_str(),
             &path,
             method.as_str(),
             status.as_str(),
         ])
         .inc();
+    }
 
     let elapsed_time_res = current_time.elapsed()?;
     info!(

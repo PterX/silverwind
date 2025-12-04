@@ -289,7 +289,7 @@ async fn request_outbound(
         let tcpstream = TcpStream::connect(addr).await?;
         let (send_request, connection) = client::handshake(tcpstream).await?;
         tokio::spawn(async move {
-            connection.await.unwrap();
+            connection.await;
             debug!("The connection has closed!");
         });
         send_request
