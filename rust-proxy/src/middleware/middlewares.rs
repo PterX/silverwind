@@ -66,37 +66,15 @@ pub enum MiddleWares {
 impl PartialEq for MiddleWares {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::RateLimit(a), Self::RateLimit(b)) => {
-                let a_lock = match a.lock() {
-                    Ok(guard) => guard,
-                    Err(_) => return false,
-                };
+            (Self::RateLimit(a), Self::RateLimit(b)) => Arc::ptr_eq(a, b),
 
-                let b_lock = match b.lock() {
-                    Ok(guard) => guard,
-                    Err(_) => return false,
-                };
-
-                *a_lock == *b_lock
-            }
             (Self::Authentication(a), Self::Authentication(b)) => a == b,
             (Self::AllowDenyList(a), Self::AllowDenyList(b)) => a == b,
             (Self::Cors(a), Self::Cors(b)) => a == b,
             (Self::Headers(a), Self::Headers(b)) => a == b,
             (Self::ForwardHeader(a), Self::ForwardHeader(b)) => a == b,
-            (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => {
-                let a_lock = match a.lock() {
-                    Ok(guard) => guard,
-                    Err(_) => return false,
-                };
+            (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => Arc::ptr_eq(a, b),
 
-                let b_lock = match b.lock() {
-                    Ok(guard) => guard,
-                    Err(_) => return false,
-                };
-
-                *a_lock == *b_lock
-            }
             (Self::RequestHeaders(a), Self::RequestHeaders(b)) => a == b,
             _ => false,
         }

@@ -177,8 +177,8 @@ impl ChainTrait for CommonCheckRequest {
             let router_destination = best_route.router.get_route(headers)?;
             let timeout = best_route
                 .timeout
-                .clone()
-                .unwrap_or(TimeoutConfig {
+                .as_ref()
+                .unwrap_or(&TimeoutConfig {
                     request_timeout: request_timeout_sec as u64,
                 })
                 .request_timeout;
@@ -199,7 +199,7 @@ impl ChainTrait for CommonCheckRequest {
                     spire_context.middlewares = best_route.middlewares.clone();
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path,
-                        router_destination: RouterDestination::Http(base_route.clone()),
+                        router_destination: RouterDestination::Http(base_route),
                         timeout,
                     }));
                 }
@@ -207,7 +207,7 @@ impl ChainTrait for CommonCheckRequest {
                     spire_context.middlewares = best_route.middlewares.clone();
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path: rest_path,
-                        router_destination: RouterDestination::Grpc(base_route.clone()),
+                        router_destination: RouterDestination::Grpc(base_route),
                         timeout,
                     }));
                 }
