@@ -1,10 +1,10 @@
 use chrono::DateTime;
 use chrono::Local;
 
+use logroller::{Compression, LogRollerBuilder, Rotation, RotationAge, TimeZone};
 use std::path::Path;
 use tracing::level_filters::LevelFilter;
 use tracing_appender::rolling;
-use tracing_appender::rolling::RollingFileAppender;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::time::FormatTime;
@@ -38,12 +38,13 @@ pub fn setup_logger() -> Result<Handle<Targets, Registry>, AppError> {
 pub fn setup_logger_with_path(
     log_directory: &Path,
 ) -> Result<(impl Layer<Registry> + 'static, Handle<Targets, Registry>), AppError> {
-    let rolling_file_builder = RollingFileAppender::builder()
-        .rotation(rolling::Rotation::DAILY)
-        .filename_prefix("spire")
-        .filename_suffix("log")
-        .max_log_files(10)
-        .build(log_directory)?;
+    let filename = Path::new("spire.log");
+    let rolling_file_builder = LogRollerBuilder::new(log_directory, filename)
+        .rotation(Rotation::AgeBased(RotationAge::Daily)) // Rotate daily
+        .max_keep_files(7) // Keep a week's worth of logs
+        .time_zone(TimeZone::Local) // Use local timezone
+        .build()
+        .map_err(|e| AppError(e.to_string()))?;
     let filter = filter::Targets::new()
         .with_targets(vec![
             ("delay_timer", LevelFilter::OFF),
@@ -51,13 +52,14 @@ pub fn setup_logger_with_path(
         ])
         .with_default(LevelFilter::INFO);
     let (filter, reload_handle) = reload::Layer::new(filter);
+    let (non_blocking, _guard) = tracing_appender::non_blocking(rolling_file_builder);
 
     let file_layer = tracing_subscriber::fmt::Layer::new()
         .with_target(true)
         .with_ansi(false)
         .with_line_number(true)
         .with_timer(LocalTime)
-        .with_writer(rolling_file_builder)
+        .with_writer(non_blocking)
         .with_filter(filter);
     // let console_layer = tracing_subscriber::fmt::Layer::new()
     //     .with_target(true)
@@ -76,41 +78,6 @@ mod tests {
     use tempfile::tempdir;
     use tracing::Subscriber;
     use tracing::{debug, error, event, info, trace, warn, Level};
-    pub fn _setup_logger_for_test() -> Result<Handle<Targets, Registry>, AppError> {
-        let rolling_file_builder = RollingFileAppender::builder()
-            .rotation(rolling::Rotation::MINUTELY)
-            .filename_prefix("spire")
-            .filename_suffix("log")
-            .max_log_files(10)
-            .build("./logs")?;
-        let filter = filter::Targets::new()
-            .with_targets(vec![
-                ("delay_timer", LevelFilter::OFF),
-                ("hyper_util", LevelFilter::OFF),
-            ])
-            .with_default(LevelFilter::INFO);
-        let (filter, reload_handle) = reload::Layer::new(filter);
-
-        let file_layer = tracing_subscriber::fmt::Layer::new()
-            .with_target(true)
-            .with_ansi(false)
-            .with_line_number(true)
-            .with_timer(LocalTime)
-            .with_writer(rolling_file_builder)
-            .with_filter(filter);
-        let console_layer = tracing_subscriber::fmt::Layer::new()
-            .with_target(true)
-            .with_ansi(true)
-            .with_timer(LocalTime)
-            .with_writer(std::io::stdout)
-            .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
-        let _ = tracing_subscriber::registry()
-            .with(file_layer)
-            .with(console_layer)
-            .with(tracing_subscriber::filter::LevelFilter::TRACE)
-            .try_init();
-        Ok(reload_handle)
-    }
 
     fn build_test_subscriber(
         log_directory: &Path,
