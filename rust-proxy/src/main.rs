@@ -31,16 +31,17 @@ use tracing_subscriber::filter::LevelFilter;
 mod vojo;
 use crate::configuration_service::app_config_service;
 use crate::vojo::app_error::AppError;
-#[macro_use]
-extern crate log;
+
 #[macro_use]
 extern crate clap;
+#[macro_use]
+extern crate tracing;
 use crate::control_plane::rest_api::start_control_plane;
 use tracing_subscriber::reload::Handle;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    let reload_handle = setup_logger()?;
+    let (reload_handle, guard) = setup_logger()?;
     rustls::crypto::ring::default_provider()
         .install_default()
         .map_err(|e| AppError::from("Failed to install rustls crypto provider"))?;

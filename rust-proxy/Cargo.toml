@@ -39,7 +39,6 @@ chrono = "=0.4.41"
 clap = { version = "=4.5.46", features = ["derive", "cargo"] }
 delay_timer = "=0.11.6"
 derive_builder = "=0.20.2"
-env_logger = "=0.11.8"
 futures = { version = "=0.3.31", features = ["thread-pool"] }
 futures-util = { version = "=0.3.31", default-features = false }
 h2 = "=0.4.12"
@@ -65,10 +64,9 @@ instant-acme = { version = "=0.8.2", default-features = false, features = [
 ipnet = "=2.11.0"
 iprange = "=0.6.7"
 jsonwebtoken = "=9.3.1"
-logroller = "=0.1.10"
+logroller = { version = "=0.1.10", features = ["tracing"] }
 
 lazy_static = "=1.5.0"
-log = "=0.4.27"
 mime = "=0.3.17"
 mockall = "=0.13.1"
 notify = "=8.2.0"
@@ -109,7 +107,7 @@ tower = { version = "=0.5.2", features = ["util"] }
 tower-http = { version = "=0.6.6", features = ["full"] }
 tracing = "=0.1.41"
 tracing-appender = "=0.2.4"
-tracing-subscriber = { version = "=0.3.19", features = ["tracing-log"] }
+tracing-subscriber = { version = "=0.3.19" }
 typetag = "=0.2.20"
 url = "=2.5.7"
 uuid = { version = "=1.18.0", features = [
