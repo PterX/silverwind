@@ -76,11 +76,7 @@ where
     }
     Ok(hashmap)
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct Matcher {
-    pub prefix: String,
-    pub prefix_rewrite: String,
-}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LivenessConfig {
     pub min_liveness_count: i32,
