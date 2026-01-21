@@ -1,32 +1,32 @@
-use crate::constants::common_constants::DEFAULT_HTTP_TIMEOUT;
+use crate::control_plane::cert_loader::load_tls_config;
+use crate::control_plane::cert_loader::watch_for_certificate_changes;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::proxy::http1::app_clients::AppClients;
+use crate::proxy::http1::websocket_proxy::server_upgrade;
 use crate::proxy::proxy_trait::DestinationResult;
+use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
+use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::SharedConfig;
 use bytes::Bytes;
 use http::{HeaderValue, Uri};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::header;
 use hyper::header::{CONNECTION, SEC_WEBSOCKET_KEY};
-use hyper::Method;
-use hyper::StatusCode;
-
-use crate::proxy::http1::websocket_proxy::server_upgrade;
-use crate::proxy::proxy_trait::{ChainTrait, SpireContext};
-use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
+use hyper::Method;
+use hyper::StatusCode;
 use hyper::{Request, Response};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
-use rustls_pki_types::CertificateDer;
+use rustls::ServerConfig;
 use serde_json::json;
-use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::SystemTime;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -69,7 +69,7 @@ impl HttpProxy {
                                 });
                                 proxy_adapter(cloned_port,cloned_shared_config.clone(),client_cloned.clone(), req, mapping_key2.clone(), addr)
                             }),
-                        )
+                        ).with_upgrades()
                         .await
                     {
                         error!("Error serving connection: {err:?}");
@@ -85,39 +85,40 @@ impl HttpProxy {
 
         Ok(())
     }
-    pub async fn start_https_server(
-        &mut self,
-        pem_str: String,
-        key_str: String,
-    ) -> Result<(), AppError> {
+    pub async fn start_https_server(&mut self, domains: Vec<String>) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
         let client = AppClients::new(self.shared_config.clone(), self.port).await?;
         let mapping_key_clone1 = self.mapping_key.clone();
 
-        let mut cer_reader = BufReader::new(pem_str.as_bytes());
-        let certs: Vec<CertificateDer<'_>> =
-            rustls_pemfile::certs(&mut cer_reader).collect::<Result<Vec<_>, _>>()?;
-
-        let mut key_reader = BufReader::new(key_str.as_bytes());
-        let key_der = rustls_pemfile::private_key(&mut key_reader)?
-            .ok_or_else(|| AppError("Key not found in PEM file".to_string()))?;
-
-        let tls_cfg = {
-            let cfg = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, key_der)?;
-            Arc::new(cfg)
-        };
-        let tls_acceptor = TlsAcceptor::from(tls_cfg);
+        let tls_cfg = load_tls_config(domains.first().ok_or(AppError(
+            "Cannot create certificate because the domains list is empty.".to_string(),
+        ))?)?;
+        let shared_tls_config: Arc<RwLock<ServerConfig>> = Arc::new(RwLock::new(tls_cfg));
+        let watcher_config_clone = shared_tls_config.clone();
+        let domain_name = domains.first().ok_or(AppError(
+            "Cannot create certificate because the domains list is empty.".to_string(),
+        ))?;
+        let domain_to_watch = domain_name.to_string();
+        tokio::spawn(async move {
+            info!("Starting certificate watcher for domain: {domain_to_watch}");
+            if let Err(e) =
+                watch_for_certificate_changes(&domain_to_watch, watcher_config_clone).await
+            {
+                error!("Certificate watcher task for domain [{domain_to_watch}] has failed: {e}");
+            }
+        });
         let reveiver = &mut self.channel;
-
         let listener = TcpListener::bind(addr).await?;
-        info!("Listening on http://{addr}");
+        info!("Listening on https://{addr}");
         loop {
             tokio::select! {
                     Ok((tcp_stream,addr))= listener.accept()=>{
-                let tls_acceptor = tls_acceptor.clone();
+                        let tls_acceptor = {
+                            let config_guard = shared_tls_config.read().map_err(|e| AppError(format!("Failed to get read lock on TLS config: {e}")))?;
+                            info!("config_guard is {config_guard:?}");
+                            TlsAcceptor::from(Arc::new(config_guard.clone()))
+                        };
                 let cloned_shared_config=self.shared_config.clone();
                 let cloned_port=self.port;
                 let client = client.clone();
@@ -137,7 +138,7 @@ impl HttpProxy {
 
                         proxy_adapter(cloned_port,cloned_shared_config.clone(),client.clone(), req, mapping_key2.clone(), addr)
                     });
-                    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+                    if let Err(err) = http1::Builder::new().serve_connection(io, service).with_upgrades().await {
                         error!("Error serving connection: {err:?}");
                     }
                 });
@@ -195,11 +196,14 @@ async fn proxy_adapter_with_error(
 
     let current_time = SystemTime::now();
 
-    let timer = metrics::HTTP_REQUEST_DURATION_SECONDS
+    let Some(s) = metrics::HTTP_REQUEST_DURATION_SECONDS.get() else {
+        return Err(AppError::from("HTTP_REQUEST_DURATION_SECONDS"));
+    };
+    let timer = s
         .with_label_values(&[mapping_key.as_str(), path.as_str(), method.as_str()])
         .start_timer();
 
-    let res = proxy(
+    let res = match proxy(
         port,
         shared_config,
         client,
@@ -209,31 +213,43 @@ async fn proxy_adapter_with_error(
         CommonCheckRequest {},
     )
     .await
-    .unwrap_or_else(|err| {
-        error!("The error is {err}.");
-        let json_value = json!({
-            "response_code": -1,
-            "response_object": format!("{}", err)
-        });
-        Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(
-                Full::new(Bytes::copy_from_slice(json_value.to_string().as_bytes()))
-                    .map_err(AppError::from)
-                    .boxed(),
-            )
-            .unwrap()
-    });
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            error!("The error is {err}.");
+            let json_value = json!({
+                "response_code": -1,
+                "response_object": err.to_string(),
+            });
+
+            let body = Full::new(Bytes::copy_from_slice(json_value.to_string().as_bytes()))
+                .map_err(AppError::from)
+                .boxed();
+
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(body)
+                .unwrap_or_else(|e| {
+                    error!("Failed to build response: {e}");
+                    Response::new(
+                        Full::new(Bytes::from_static(b"{\"response_code\":-1}"))
+                            .map_err(AppError::from)
+                            .boxed(),
+                    )
+                })
+        }
+    };
     timer.observe_duration();
     let status = res.status();
-    metrics::HTTP_REQUESTS_TOTAL
-        .with_label_values(&[
+    if let Some(s) = metrics::HTTP_REQUESTS_TOTAL.get() {
+        s.with_label_values(&[
             mapping_key.as_str(),
             &path,
             method.as_str(),
             status.as_str(),
         ])
         .inc();
+    }
 
     let elapsed_time_res = current_time.elapsed()?;
     info!(
@@ -259,12 +275,14 @@ async fn proxy(
     debug!("req: {req:?}");
 
     let inbound_headers = req.headers();
+    let method = req.method();
     let uri = req.uri().clone();
     let mut spire_context = SpireContext::new(port, None);
     let handling_result = chain_trait
         .get_destination(
             shared_config.clone(),
             port,
+            method,
             mapping_key.clone(),
             inbound_headers,
             uri,
@@ -309,9 +327,7 @@ async fn proxy(
     if inbound_headers.clone().contains_key(CONNECTION)
         && inbound_headers.contains_key(SEC_WEBSOCKET_KEY)
     {
-        debug!(
-            "The request has been updated to websocket,the req is {req:?}!"
-        );
+        debug!("The request has been updated to websocket,the req is {req:?}!");
         return server_upgrade(req, handling_result, client.http).await;
     }
 
@@ -341,10 +357,11 @@ async fn proxy(
                         .await?;
                 }
             }
+            let timeout = check_request.timeout;
             let request_future = if request_path.contains("https") {
-                client.http.request_https(req, DEFAULT_HTTP_TIMEOUT)
+                client.http.request_https(req, timeout)
             } else {
-                client.http.request_http(req, DEFAULT_HTTP_TIMEOUT)
+                client.http.request_http(req, timeout)
             };
             let response_result = match request_future.await {
                 Ok(response) => response.map_err(AppError::from),
@@ -426,16 +443,16 @@ mod tests {
     use crate::middleware::authentication::BasicAuth;
     use crate::middleware::middlewares::MiddleWares;
     use crate::proxy::proxy_trait::{HandlingResult, MockChainTrait};
-    use crate::vojo::app_config::Matcher;
     use crate::vojo::app_config::{ApiService, RouteConfig};
+    use crate::vojo::matcher::MatcherRule;
     use crate::vojo::router::{BaseRoute, RandomRoute, Router};
     use crate::{vojo::router::StaticFileRoute, AppConfig};
     use http::HeaderMap;
     use std::collections::HashMap;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
+    use std::sync::Arc;
     use std::sync::Mutex;
-
     #[test]
     fn test_http_proxy_creation() {
         let (_, rx) = mpsc::channel(1);
@@ -488,7 +505,6 @@ mod tests {
     }
     #[tokio::test]
     async fn test_options_preflight_request() {
-        // let _ = setup_logger_for_test();
         let mut headers = HeaderMap::new();
         headers.insert(
             header::ORIGIN,
@@ -512,10 +528,11 @@ mod tests {
                                     ..Default::default()
                                 }],
                             }),
-                            matcher: Some(Matcher {
-                                prefix: "/".to_string(),
-                                prefix_rewrite: "/".to_string(),
-                            }),
+                            matchers: vec![MatcherRule::Path {
+                                value: "/".to_string(),
+                                match_type: crate::vojo::matcher::PathMatchType::Exact,
+                                regex: None,
+                            }],
 
                             ..Default::default()
                         }],
@@ -547,7 +564,7 @@ mod tests {
         )
         .await;
         println!("result is {result:?}");
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
     #[tokio::test]
     async fn test_proxy_handling_result_none() {
@@ -576,7 +593,7 @@ mod tests {
         let mut mock_chain_trait = MockChainTrait::new();
         mock_chain_trait
             .expect_get_destination()
-            .returning(|_, _, _, _, _, _, _| {
+            .returning(|_, _, _, _, _, _, _, _| {
                 Ok(crate::proxy::proxy_trait::DestinationResult::NoMatchFound)
             });
         let result = proxy(
@@ -617,9 +634,8 @@ mod tests {
         req.headers_mut().extend(headers);
 
         let mut mock_chain_trait = MockChainTrait::new();
-        mock_chain_trait
-            .expect_get_destination()
-            .returning(|_, _, _, _, _, _, spire_context| {
+        mock_chain_trait.expect_get_destination().returning(
+            |_, _, _, _, _, _, _, spire_context| {
                 spire_context.middlewares = Some(vec![MiddleWares::Authentication(
                     crate::middleware::authentication::Authentication::Basic(BasicAuth {
                         credentials: "user:pass".to_string(),
@@ -632,11 +648,16 @@ mod tests {
                         router_destination: RouterDestination::File(StaticFileRoute {
                             doc_root: "./test".to_string(),
                         }),
+                        timeout: 1000,
                     },
                 ))
-            });
+            },
+        );
         mock_chain_trait
             .expect_handle_before_request()
+            .returning(|_, _, _| Err(AppError("test".to_string())));
+        mock_chain_trait
+            .expect_handle_before_response()
             .returning(|_, _, _| Err(AppError("test".to_string())));
         let result = proxy(
             8080,
@@ -678,13 +699,14 @@ mod tests {
         let mut mock_chain_trait = MockChainTrait::new();
         mock_chain_trait
             .expect_get_destination()
-            .returning(|_, _, _, _, _, _, _| {
+            .returning(|_, _, _, _, _, _, _, _| {
                 Ok(crate::proxy::proxy_trait::DestinationResult::Matched(
                     HandlingResult {
                         request_path: "/test".to_string(),
                         router_destination: RouterDestination::File(StaticFileRoute {
                             doc_root: "./test".to_string(),
                         }),
+                        timeout: 1000,
                     },
                 ))
             });

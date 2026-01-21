@@ -1,9 +1,8 @@
 use crate::constants::common_constants::DEFAULT_TEMPORARY_DIR;
-use crate::control_plane::lets_encrypt::lets_encrypt_certificate;
+use crate::control_plane::certificate_api::lets_encrypt_certificate;
 use crate::vojo::app_config::ApiService;
 use crate::vojo::app_config::AppConfig;
 use crate::vojo::app_config::RouteConfig;
-use crate::vojo::app_config::ServiceType;
 use axum::middleware::Next;
 use std::time::Instant;
 
@@ -63,9 +62,9 @@ async fn post_app_config_with_error(
     let api_service: ApiService = serde_yaml::from_slice(&bytes)?;
     let current_type = api_service.server_type.clone();
     let port = api_service.listen_port;
-    if current_type == ServiceType::Https || current_type == ServiceType::Http2Tls {
-        validate_tls_config(api_service.cert_str.clone(), api_service.key_str.clone())?;
-    }
+    // if current_type == ServiceType::Https || current_type == ServiceType::Http2Tls {
+    //     validate_tls_config(api_service.cert_str.clone(), api_service.key_str.clone())?;
+    // }
     let mut rw_global_lock = shared_config.shared_data.lock()?;
     match rw_global_lock
         .api_service_config
@@ -197,30 +196,7 @@ async fn save_config_to_file(app_config: AppConfig) -> Result<(), AppError> {
     f.write_all(api_service_str.as_bytes()).await?;
     Ok(())
 }
-pub fn validate_tls_config(
-    cert_pem_option: Option<String>,
-    key_pem_option: Option<String>,
-) -> Result<(), AppError> {
-    if cert_pem_option.is_none() || key_pem_option.is_none() {
-        return Err(AppError::from("Cert or key is none"));
-    }
-    let cert_pem = cert_pem_option.ok_or(AppError::from("Cert is none"))?;
-    let mut cer_reader = std::io::BufReader::new(cert_pem.as_bytes());
-    let result_certs = rustls_pemfile::certs(&mut cer_reader).next();
-    if result_certs.is_none()
-        || result_certs
-            .ok_or(AppError("result_certs is null".to_string()))?
-            .is_err()
-    {
-        return Err(AppError::from("Can not parse the certs pem."));
-    }
-    let key_pem = key_pem_option.ok_or(AppError::from("Key is none"))?;
-    let key_pem_result = pkcs8::Document::from_pem(key_pem.as_str());
-    if key_pem_result.is_err() {
-        return Err(AppError::from("Can not parse the key pem."));
-    }
-    Ok(())
-}
+
 async fn print_request_response(req: Request<axum::body::Body>, next: Next) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -534,13 +510,5 @@ mod tests {
         let res = save_config_to_file(app_config).await;
         println!("{res:?}");
         assert!(res.is_ok());
-    }
-    use crate::control_plane::rest_api::validate_tls_config;
-    #[tokio::test]
-    async fn test_validate_tls_config_success() {
-        let cert_pem = "-----BEGIN CERTIFICATE-----...-----END CERTIFICATE-----";
-        let key_pem = "-----BEGIN PRIVATE KEY-----...-----END PRIVATE KEY-----";
-        let res = validate_tls_config(Some(cert_pem.to_string()), Some(key_pem.to_string()));
-        assert!(res.is_err());
     }
 }

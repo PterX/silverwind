@@ -19,3 +19,4 @@ log
 logs
 *.html
 *.profraw
+.claude

@@ -1,5 +1,7 @@
 use crate::constants::common_constants::GRPC_STATUS_HEADER;
 use crate::constants::common_constants::GRPC_STATUS_OK;
+use crate::control_plane::cert_loader::load_tls_config;
+use crate::control_plane::cert_loader::watch_for_certificate_changes;
 use crate::proxy::proxy_trait::ChainTrait;
 use crate::proxy::proxy_trait::CommonCheckRequest;
 use crate::proxy::proxy_trait::SpireContext;
@@ -15,11 +17,11 @@ use http::{Method, Request};
 use hyper::body::Bytes;
 
 use crate::SharedConfig;
-use rustls_pki_types::CertificateDer;
-use std::io::BufReader;
+use rustls::ServerConfig;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use std::sync::RwLock;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -140,32 +142,27 @@ impl GrpcProxy {
             };
         }
     }
-    pub async fn start_tls_proxy(
-        &mut self,
-        pem_str: String,
-        key_str: String,
-    ) -> Result<(), AppError> {
+    pub async fn start_tls_proxy(&mut self, domains: Vec<String>) -> Result<(), AppError> {
         let port_clone = self.port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port_clone as u16));
-        let mut cer_reader = BufReader::new(pem_str.as_bytes());
-        // let certs = rustls_pemfile::certs(&mut cer_reader)
-        //     .unwrap()
-        //     .iter()
-        //     .map(|s| rustls::Certificate((*s).clone()))
-        //     .collect();
-        let certs: Vec<CertificateDer<'_>> =
-            rustls_pemfile::certs(&mut cer_reader).collect::<Result<Vec<_>, _>>()?;
+        let tls_cfg = load_tls_config(domains.first().ok_or(AppError(
+            "Cannot create certificate because the domains list is empty.".to_string(),
+        ))?)?;
 
-        let mut key_reader = BufReader::new(key_str.as_bytes());
-        let key_der = rustls_pemfile::private_key(&mut key_reader)?.ok_or("key_der is none")?;
-
-        let tls_cfg = {
-            let cfg = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, key_der)?;
-            Arc::new(cfg)
-        };
-        let tls_acceptor = TlsAcceptor::from(tls_cfg);
+        let shared_tls_config: Arc<RwLock<ServerConfig>> = Arc::new(RwLock::new(tls_cfg));
+        let watcher_config_clone = shared_tls_config.clone();
+        let domain_name = domains.first().ok_or(AppError(
+            "Cannot create certificate because the domains list is empty.".to_string(),
+        ))?;
+        let domain_to_watch = domain_name.to_string();
+        tokio::spawn(async move {
+            info!("Starting certificate watcher for domain: {domain_to_watch}");
+            if let Err(e) =
+                watch_for_certificate_changes(&domain_to_watch, watcher_config_clone).await
+            {
+                error!("Certificate watcher task for domain [{domain_to_watch}] has failed: {e}");
+            }
+        });
 
         info!("Listening on grpc with tls://{addr}");
         let listener = TcpListener::bind(addr).await?;
@@ -176,6 +173,10 @@ impl GrpcProxy {
             let accept_future = listener.accept();
             tokio::select! {
                accept_result=accept_future=>{
+                let tls_acceptor = {
+                    let config_guard = shared_tls_config.read().map_err(|e| AppError(format!("Failed to get read lock on TLS config: {e}")))?;
+                    TlsAcceptor::from(Arc::new(config_guard.clone()))
+                };
                 let cloned_port=self.port;
                 let cloned_config=self.shared_config.clone();
                 if let Ok((tcp_stream, peer_addr))=accept_result{
@@ -222,12 +223,14 @@ async fn request_outbound(
     let (inbound_parts, inbound_body) = inbount_request.into_parts();
 
     let inbound_headers = inbound_parts.headers;
+    let method = inbound_parts.method;
     let uri = inbound_parts.uri.clone();
     let mut spire_context = SpireContext::new(port, None);
     let check_result = check_trait
         .get_destination(
             shared_config,
             port,
+            &method,
             mapping_key.clone(),
             &inbound_headers,
             uri,
@@ -286,7 +289,7 @@ async fn request_outbound(
         let tcpstream = TcpStream::connect(addr).await?;
         let (send_request, connection) = client::handshake(tcpstream).await?;
         tokio::spawn(async move {
-            connection.await.unwrap();
+            connection.await;
             debug!("The connection has closed!");
         });
         send_request

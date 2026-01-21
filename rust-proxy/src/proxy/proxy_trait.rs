@@ -2,14 +2,18 @@ use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::middlewares::Denial;
 use crate::middleware::middlewares::MiddleWares;
 use crate::middleware::middlewares::Middleware;
+use crate::vojo::app_config::RouteConfig;
 use crate::vojo::app_error::AppError;
+use crate::vojo::matcher::MatcherRule;
 use crate::vojo::router::BaseRoute;
 use crate::vojo::router::StaticFileRoute;
+use crate::vojo::timeout_config::TimeoutConfig;
 use crate::SharedConfig;
 use bytes::Bytes;
 use http::header;
 use http::header::HeaderMap;
 use http::HeaderValue;
+use http::Method;
 use http::Request;
 use http::StatusCode;
 use http_body_util::combinators::BoxBody;
@@ -48,6 +52,7 @@ pub struct CommonCheckRequest;
 pub struct HandlingResult {
     pub request_path: String,
     pub router_destination: RouterDestination,
+    pub timeout: u64,
 }
 
 #[derive(Debug)]
@@ -111,6 +116,7 @@ impl ChainTrait for CommonCheckRequest {
         &self,
         shared_config: SharedConfig,
         port: i32,
+        method: &Method,
         _mapping_key: String,
         headers: &HeaderMap,
         uri: Uri,
@@ -122,6 +128,9 @@ impl ChainTrait for CommonCheckRequest {
             .ok_or(AppError::from("Path is empty"))?
             .as_str();
         let mut app_config = shared_config.shared_data.lock()?;
+        let request_timeout_sec = app_config.upstream_timeout_secs.ok_or(AppError::from(
+            "Can not find request_timeout_sec  from app config.",
+        ))?;
         let api_service = app_config
             .api_service_config
             .get_mut(&port)
@@ -129,12 +138,34 @@ impl ChainTrait for CommonCheckRequest {
                 "Can not find config by port from app config.",
             ))?;
         debug!("api_service_config: {api_service:?}");
+        let mut best_match: Option<(&mut RouteConfig, String, usize)> = None;
         for item in api_service.route_configs.iter_mut() {
-            let match_result = item.is_matched(backend_path, Some(headers))?;
-            if match_result.is_none() {
-                continue;
+            if let Some(rewritten_path) = item.match_and_rewrite(backend_path, method, headers)? {
+                let current_match_len = item
+                    .matchers
+                    .iter()
+                    .filter_map(|m| match m {
+                        MatcherRule::Path { value, .. } => Some(value.as_str()),
+                        _ => None,
+                    })
+                    .filter(|pattern| backend_path.starts_with(*pattern))
+                    .max_by_key(|pattern| pattern.len())
+                    .unwrap_or("")
+                    .len();
+
+                match best_match.as_mut() {
+                    Some((_, _, best_len)) if current_match_len > *best_len => {
+                        best_match = Some((item, rewritten_path, current_match_len));
+                    }
+                    None => {
+                        best_match = Some((item, rewritten_path, current_match_len));
+                    }
+                    _ => {}
+                }
             }
-            let check_res = item.is_allowed(&peer_addr, Some(headers))?;
+        }
+        if let Some((best_route, rest_path, _)) = best_match {
+            let check_res = best_route.is_allowed(&peer_addr, Some(headers))?;
             if !check_res.is_allowed() {
                 return Ok(DestinationResult::NotAllowed(
                     check_res
@@ -142,33 +173,42 @@ impl ChainTrait for CommonCheckRequest {
                         .ok_or(AppError::from("get_denial cause error"))?,
                 ));
             }
-            let router_destination = item.router.get_route(headers)?;
-            let rest_path = match_result.ok_or("match_result is none")?;
+
+            let router_destination = best_route.router.get_route(headers)?;
+            let timeout = best_route
+                .timeout
+                .as_ref()
+                .unwrap_or(&TimeoutConfig {
+                    request_timeout: request_timeout_sec as u64,
+                })
+                .request_timeout;
 
             match router_destination {
                 RouterDestination::File(file_route) => {
                     let path = Path::new(&file_route.doc_root);
                     let request_path = path.join(rest_path);
-                    spire_context.middlewares = item.middlewares.clone();
+                    spire_context.middlewares = best_route.middlewares.clone();
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path: String::from(request_path.to_str().unwrap_or_default()),
                         router_destination: RouterDestination::File(file_route),
+                        timeout,
                     }));
                 }
                 RouterDestination::Http(base_route) => {
-                    let request_path = [base_route.endpoint.as_str(), rest_path.as_str()].join("/");
-                    spire_context.middlewares = item.middlewares.clone();
+                    let request_path = [base_route.endpoint.as_str(), rest_path.as_str()].join("");
+                    spire_context.middlewares = best_route.middlewares.clone();
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path,
-                        router_destination: RouterDestination::Http(base_route.clone()),
+                        router_destination: RouterDestination::Http(base_route),
+                        timeout,
                     }));
                 }
                 RouterDestination::Grpc(base_route) => {
-                    // let request_path = [base_route.endpoint.as_str(), rest_path.as_str()].join("/");
-                    spire_context.middlewares = item.middlewares.clone();
+                    spire_context.middlewares = best_route.middlewares.clone();
                     return Ok(DestinationResult::Matched(HandlingResult {
                         request_path: rest_path,
-                        router_destination: RouterDestination::Grpc(base_route.clone()),
+                        router_destination: RouterDestination::Grpc(base_route),
+                        timeout,
                     }));
                 }
             }
@@ -233,6 +273,7 @@ pub trait ChainTrait {
         &self,
         shared_config: SharedConfig,
         port: i32,
+        method: &Method,
         mapping_key: String,
         headers: &HeaderMap,
         uri: Uri,
@@ -311,6 +352,7 @@ mod tests {
             .get_destination(
                 shared_config,
                 8080,
+                &http::Method::GET,
                 "test".into(),
                 &headers,
                 uri,
@@ -352,6 +394,7 @@ mod tests {
             .get_destination(
                 shared_config,
                 8080,
+                &http::Method::GET,
                 "test".into(),
                 &headers,
                 uri,
@@ -383,6 +426,7 @@ mod tests {
             .get_destination(
                 shared_config,
                 8080,
+                &http::Method::GET,
                 "test".into(),
                 &headers,
                 uri,
@@ -392,6 +436,6 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.is_matched());
+        assert!(!result.is_matched());
     }
 }

@@ -5,11 +5,14 @@ use crate::utils::uuid::get_uuid;
 use crate::vojo::anomaly_detection::AnomalyDetectionType;
 use crate::vojo::app_error::AppError;
 use crate::vojo::health_check::HealthCheckType;
+use crate::vojo::matcher::MatcherRule;
 use crate::vojo::router::deserialize_router;
 use crate::vojo::router::Router;
+use crate::vojo::timeout_config::TimeoutConfig;
 use crate::DEFAULT_ADMIN_PORT;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::Method;
 use regex::Regex;
 use serde::Deserializer;
 use serde::Serializer;
@@ -20,9 +23,16 @@ use tokio::sync::mpsc;
 use tracing_subscriber::filter::LevelFilter;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub acme: AcmeConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub health_check_log_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_port: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_timeout_secs: Option<i32>,
     #[serde(
         rename = "servers",
         deserialize_with = "deserialize_service_config",
@@ -30,6 +40,7 @@ pub struct AppConfig {
     )]
     pub api_service_config: HashMap<i32, ApiService>,
 }
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -37,6 +48,8 @@ impl Default for AppConfig {
             admin_port: Some(DEFAULT_ADMIN_PORT),
             log_level: None,
             api_service_config: Default::default(),
+            acme: AcmeConfig::default(),
+            upstream_timeout_secs: Some(5000),
         }
     }
 }
@@ -63,11 +76,7 @@ where
     }
     Ok(hashmap)
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct Matcher {
-    pub prefix: String,
-    pub prefix_rewrite: String,
-}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LivenessConfig {
     pub min_liveness_count: i32,
@@ -88,10 +97,11 @@ pub struct Transcode {
 pub struct RouteConfig {
     #[serde(skip_serializing_if = "is_empty", default = "default_route_id")]
     pub route_id: String,
+
+    #[serde(default)]
+    pub matchers: Vec<MatcherRule>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub matcher: Option<Matcher>,
+    pub path_rewrite: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcode: Option<Transcode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -108,6 +118,8 @@ pub struct RouteConfig {
     pub router: Router,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub middlewares: Option<Vec<MiddleWares>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<TimeoutConfig>,
 }
 
 fn default_route_id() -> String {
@@ -115,46 +127,42 @@ fn default_route_id() -> String {
 }
 
 impl RouteConfig {
-    pub fn is_matched(
+    pub fn match_and_rewrite(
         &mut self,
         path: &str,
-        headers_option: Option<&HeaderMap<HeaderValue>>,
+        method: &Method,
+        headers: &HeaderMap<HeaderValue>,
     ) -> Result<Option<String>, AppError> {
-        let matcher = self
-            .matcher
-            .as_mut()
-            .ok_or("The matcher counld not be none for http")?;
-
-        let match_res = path.strip_prefix(matcher.prefix.as_str());
-        if match_res.is_none() {
+        if self
+            .matchers
+            .iter_mut()
+            .all(|rule| rule.matches(method, path, headers))
+        {
+        } else {
             return Ok(None);
         }
-        let final_path = [
-            matcher.prefix_rewrite.as_str(),
-            match_res.ok_or("match_res is none")?,
-        ]
-        .join("");
-        // info!("final_path:{}", final_path);
-        if let Some(real_host_name) = &self.host_name {
-            if headers_option.is_none() {
-                return Ok(None);
+        if let Some(rewrite_template) = &self.path_rewrite {
+            let path_pattern = self.matchers.iter().find_map(|m| match m {
+                MatcherRule::Path { value, .. } => Some(value),
+                _ => None,
+            });
+            if let Some(pattern) = path_pattern {
+                if let Ok(re) = Regex::new(pattern) {
+                    let rewritten_path = re.replace(path, rewrite_template.as_str());
+                    return Ok(Some(rewritten_path.into_owned()));
+                }
+
+                if let Some(stripped_path) = path.strip_prefix(pattern) {
+                    return Ok(Some(format!("{rewrite_template}{stripped_path}")));
+                }
             }
-            let header_map = headers_option.ok_or("headers_option is none")?;
-            let host_option = header_map.get("Host");
-            if host_option.is_none() {
-                return Ok(None);
-            }
-            let host_result = host_option.ok_or("host_option is none")?.to_str();
-            if host_result.is_err() {
-                return Ok(None);
-            }
-            let host_name_regex = Regex::new(real_host_name.as_str())?;
-            return host_name_regex
-                .captures(host_result?)
-                .map_or(Ok(None), |_| Ok(Some(final_path)));
+
+            Ok(Some(path.to_string()))
+        } else {
+            Ok(Some(path.to_string()))
         }
-        Ok(Some(final_path))
     }
+
     pub fn is_allowed(
         &mut self,
         peer_addr: &SocketAddr,
@@ -193,15 +201,25 @@ pub struct ApiService {
 
     #[serde(rename = "protocol")]
     pub server_type: ServiceType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cert_str: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_str: Option<String>,
+    #[serde(rename = "domains")]
+    pub domain_config: Vec<String>,
     #[serde(rename = "routes")]
     pub route_configs: Vec<RouteConfig>,
     #[serde(skip_deserializing, skip_serializing)]
     pub sender: mpsc::Sender<()>,
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "PascalCase")]
+pub enum AcmeConfig {
+    #[default]
+    LetsEncrypt,
+    #[serde(rename = "zerossl")]
+    ZeroSsl {
+        eab_kid: String,
+        eab_hmac_key: String,
+    },
+}
+
 impl<'de> Deserialize<'de> for ApiService {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -213,22 +231,21 @@ impl<'de> Deserialize<'de> for ApiService {
             port: i32,
             #[serde(rename = "protocol")]
             pub server_type: ServiceType,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub cert_str: Option<String>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub key_str: Option<String>,
+
+            #[serde(rename = "domains")]
+            #[serde(default)]
+            pub domain_config: Vec<String>,
             #[serde(rename = "routes")]
             pub route_configs: Vec<RouteConfig>,
         }
 
         let api_service_without_sender = ApiServiceWithoutSender::deserialize(deserializer)?;
-        let (sender, _) = mpsc::channel(1); // Create a new channel for the deserialized instance
+        let (sender, _) = mpsc::channel(1);
 
         Ok(ApiService {
             listen_port: api_service_without_sender.port,
             server_type: api_service_without_sender.server_type,
-            cert_str: api_service_without_sender.cert_str,
-            key_str: api_service_without_sender.key_str,
+            domain_config: api_service_without_sender.domain_config,
             route_configs: api_service_without_sender.route_configs,
             sender,
         })
@@ -238,8 +255,6 @@ impl PartialEq for ApiService {
     fn eq(&self, other: &Self) -> bool {
         self.listen_port == other.listen_port
             && self.server_type == other.server_type
-            && self.cert_str == other.cert_str
-            && self.key_str == other.key_str
             && self.route_configs == other.route_configs
     }
 }
@@ -250,10 +265,8 @@ impl Default for ApiService {
         Self {
             listen_port: Default::default(),
             server_type: Default::default(),
-            cert_str: Default::default(),
-            key_str: Default::default(),
+            domain_config: Default::default(),
             route_configs: Default::default(),
-
             sender,
         }
     }
@@ -266,6 +279,8 @@ impl AppConfig {
             Some(LogLevel::Info) => LevelFilter::INFO,
             Some(LogLevel::Error) => LevelFilter::ERROR,
             Some(LogLevel::Warn) => LevelFilter::WARN,
+            Some(LogLevel::Trace) => LevelFilter::TRACE,
+
             None => LevelFilter::OFF,
         }
     }
@@ -280,6 +295,8 @@ pub enum LogLevel {
     Error,
     #[serde(rename = "warn")]
     Warn,
+    #[serde(rename = "trace")]
+    Trace,
 }
 
 #[cfg(test)]
@@ -477,10 +494,11 @@ mod tests {
         };
         let route = RouteConfig {
             route_id: "test_route".to_string(),
-            matcher: Some(Matcher {
-                prefix: "/".to_string(),
-                prefix_rewrite: "/".to_string(),
-            }),
+            matchers: vec![MatcherRule::Path {
+                value: "/".to_string(),
+                match_type: crate::vojo::matcher::PathMatchType::Exact,
+                regex: None,
+            }],
             router: Router::WeightBased(header_based),
 
             health_check: Some(HealthCheckType::HttpGet(HttpHealthCheckParam {
@@ -565,39 +583,57 @@ mod tests {
     #[test]
     fn test_route_matching() {
         let mut route = RouteConfig {
-            matcher: Some(Matcher {
-                prefix: "/api".to_string(),
-                prefix_rewrite: "/v1".to_string(),
-            }),
+            matchers: vec![MatcherRule::Path {
+                value: "/api/test".to_string(),
+                match_type: crate::vojo::matcher::PathMatchType::Exact,
+                regex: None,
+            }],
+            path_rewrite: Some("/v1/test".to_string()),
             ..Default::default()
         };
-
-        let result = route.is_matched("/api/test", None).unwrap();
+        let get = http::Method::GET;
+        let result = route
+            .match_and_rewrite("/api/test", &get, &HeaderMap::new())
+            .unwrap();
         assert_eq!(result, Some("/v1/test".to_string()));
 
-        let result = route.is_matched("/other/test", None).unwrap();
+        let result = route
+            .match_and_rewrite("/other/test", &get, &HeaderMap::new())
+            .unwrap();
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_route_host_matching() {
         let mut route = RouteConfig {
-            host_name: Some("example.com".to_string()),
-            matcher: Some(Matcher {
-                prefix: "/api".to_string(),
-                prefix_rewrite: "/v1".to_string(),
-            }),
+            matchers: vec![
+                MatcherRule::Path {
+                    value: "/api/test".to_string(),
+                    match_type: crate::vojo::matcher::PathMatchType::Exact,
+                    regex: None,
+                },
+                MatcherRule::Host {
+                    value: "example.com".to_string(),
+                    regex: None,
+                },
+            ],
+            path_rewrite: Some("/v1/test".to_string()),
+
             ..Default::default()
         };
 
         let mut headers = HeaderMap::new();
         headers.insert("Host", HeaderValue::from_static("example.com"));
 
-        let result = route.is_matched("/api/test", Some(&headers)).unwrap();
+        let result = route
+            .match_and_rewrite("/api/test", &http::Method::GET, &headers)
+            .unwrap();
         assert_eq!(result, Some("/v1/test".to_string()));
 
         headers.insert("Host", HeaderValue::from_static("wrong.com"));
-        let result = route.is_matched("/api/test", Some(&headers)).unwrap();
+        let result = route
+            .match_and_rewrite("/api/test", &http::Method::GET, &headers)
+            .unwrap();
         assert_eq!(result, None);
     }
 

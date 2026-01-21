@@ -198,19 +198,25 @@ async fn do_http_health_check<HC: HttpClientTrait + Send + Sync + 'static>(
     for item in route_list {
         let http_client_shared = http_health_check_client.clone();
         let host_option = Url::parse(item.endpoint.as_str());
-        if host_option.is_err() {
-            error!("Parse host error,the error is {}", host_option.unwrap_err());
-            continue;
-        }
 
-        let join_option = host_option?.join(http_health_check_param.path.clone().as_str());
-        if join_option.is_err() {
-            error!("Parse host error,the error is {}", join_option.unwrap_err());
-            continue;
-        }
+        let host = match Url::parse(&item.endpoint) {
+            Ok(url) => url,
+            Err(e) => {
+                error!("Parse host error: {}", e);
+                continue;
+            }
+        };
+
+        let joined = match host.join(&http_health_check_param.path) {
+            Ok(url) => url,
+            Err(e) => {
+                error!("Join url error: {}", e);
+                continue;
+            }
+        };
 
         let req = Request::builder()
-            .uri(join_option?.to_string())
+            .uri(joined.to_string())
             .method("GET")
             .body(Full::new(Bytes::new()).map_err(AppError::from).boxed())?;
         let cloned_route = route.clone();

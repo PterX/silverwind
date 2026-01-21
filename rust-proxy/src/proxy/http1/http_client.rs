@@ -46,7 +46,7 @@ impl HttpClients {
         time_out: u64,
     ) -> Timeout<ResponseFuture> {
         let request_future = self.http_client.request(req);
-        timeout(Duration::from_secs(time_out), request_future)
+        timeout(Duration::from_millis(time_out), request_future)
     }
     pub fn request_https(
         &self,
@@ -54,6 +54,6 @@ impl HttpClients {
         time_out: u64,
     ) -> Timeout<ResponseFuture> {
         let request_future = self.https_client.request(req);
-        timeout(Duration::from_secs(time_out), request_future)
+        timeout(Duration::from_millis(time_out), request_future)
     }
 }

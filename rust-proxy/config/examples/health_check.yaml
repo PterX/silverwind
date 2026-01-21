@@ -3,15 +3,15 @@ servers:
   - listen: 4486
     protocol: http
     routes:
-      - matcher:
-          prefix: /
-          prefix_rewrite: /
+      - matchers: 
+          - kind: path
+            value: /api/v1
         forward_to:
-          type: random
+          kind: random
           targets:
             - endpoint: http://localhost:6666/
         health_check:
-          type: http_get
+          kind: http_get
           base_health_check_param:
             timeout: 10
             interval: 10

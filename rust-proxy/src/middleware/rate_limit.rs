@@ -391,7 +391,7 @@ mod tests {
             rate_limit.should_limit(&headers, &socket_addr),
             Ok(None)
         ));
-        let socket_addr_outside = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1)), 8080);
+        let _socket_addr_outside = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1)), 8080);
         assert!(matches!(
             rate_limit.should_limit(&headers, &socket_addr),
             Ok(None)

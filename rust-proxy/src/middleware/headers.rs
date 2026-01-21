@@ -88,13 +88,13 @@ impl StaticResourceHeaders {
                 let cache_control = format!("public, max-age={}", self.expires.as_secs());
                 response
                     .headers_mut()
-                    .insert(header::CACHE_CONTROL, cache_control.parse().unwrap());
+                    .insert(header::CACHE_CONTROL, cache_control.parse()?);
 
                 let expires = SystemTime::now() + self.expires;
                 let expires_str = httpdate::fmt_http_date(expires);
                 response
                     .headers_mut()
-                    .insert(header::EXPIRES, expires_str.parse().unwrap());
+                    .insert(header::EXPIRES, expires_str.parse()?);
             }
         }
         Ok(())

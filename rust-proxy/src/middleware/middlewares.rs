@@ -29,8 +29,10 @@ mod arc_mutex_serde {
         S: Serializer,
         T: Serialize,
     {
-        let data = val.lock().unwrap();
-        T::serialize(&*data, s)
+        let guard = val.lock().map_err(|e| {
+            serde::ser::Error::custom(format!("Mutex poisoned during serialization: {}", e))
+        })?;
+        T::serialize(&*guard, s)
     }
     pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<Mutex<T>>, D::Error>
     where
@@ -64,21 +66,15 @@ pub enum MiddleWares {
 impl PartialEq for MiddleWares {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::RateLimit(a), Self::RateLimit(b)) => {
-                let a_lock = a.lock().unwrap();
-                let b_lock = b.lock().unwrap();
-                *a_lock == *b_lock
-            }
+            (Self::RateLimit(a), Self::RateLimit(b)) => Arc::ptr_eq(a, b),
+
             (Self::Authentication(a), Self::Authentication(b)) => a == b,
             (Self::AllowDenyList(a), Self::AllowDenyList(b)) => a == b,
             (Self::Cors(a), Self::Cors(b)) => a == b,
             (Self::Headers(a), Self::Headers(b)) => a == b,
             (Self::ForwardHeader(a), Self::ForwardHeader(b)) => a == b,
-            (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => {
-                let a_lock = a.lock().unwrap();
-                let b_lock = b.lock().unwrap();
-                *a_lock == *b_lock
-            }
+            (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => Arc::ptr_eq(a, b),
+
             (Self::RequestHeaders(a), Self::RequestHeaders(b)) => a == b,
             _ => false,
         }
@@ -203,7 +199,6 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::USER_AGENT, "test-agent".parse().unwrap());
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        println!("a-----------------");
         let mut middleware = MiddleWares::RateLimit(Arc::new(Mutex::new(Ratelimit::TokenBucket(
             TokenBucketRateLimit::default(),
         ))));

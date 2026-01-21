@@ -1,4 +1,5 @@
 use configuration_service::logger::setup_logger;
+use delay_timer::anyhow::anyhow;
 #[cfg(not(target_env = "msvc"))]
 use mimalloc::MiMalloc;
 
@@ -7,6 +8,8 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 extern crate derive_builder;
+use crate::command::openapi_converter::handle_convert_command;
+use crate::monitor::prometheus_exporter::metrics;
 use crate::vojo::cli::Cli;
 mod configuration_service;
 mod constants;
@@ -17,45 +20,69 @@ use crate::vojo::cli::SharedConfig;
 mod health_check;
 use crate::constants::common_constants::DEFAULT_ADMIN_PORT;
 use crate::vojo::app_config::AppConfig;
+mod command;
 mod monitor;
 mod proxy;
 use tracing_subscriber::{filter, Registry};
 mod utils;
+use crate::vojo::cli::Commands;
 use tracing_subscriber::filter::LevelFilter;
 
 mod vojo;
 use crate::configuration_service::app_config_service;
 use crate::vojo::app_error::AppError;
+
 #[macro_use]
-extern crate log;
+extern crate clap;
+#[macro_use]
+extern crate tracing;
 use crate::control_plane::rest_api::start_control_plane;
 use tracing_subscriber::reload::Handle;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    let reload_handle = setup_logger()?;
+    let (reload_handle, guard) = setup_logger()?;
     rustls::crypto::ring::default_provider()
         .install_default()
-        .expect("Failed to install rustls crypto provider");
-    if let Err(e) = run_app(reload_handle).await {
-        error!("Application failed to start:   {e:?}");
-        return Err(e);
+        .map_err(|e| AppError::from("Failed to install rustls crypto provider"))?;
+
+    let cli = Cli::parse();
+    info!("CLI arguments parsed: {cli:?}");
+
+    match cli.command {
+        Some(command) => match command {
+            Commands::Convert(args) => {
+                info!("'convert' command detected, starting conversion...");
+                if let Err(e) = handle_convert_command(args).await {
+                    error!("Failed to convert OpenAPI file: {e:?}");
+                    return Err(e);
+                }
+                info!("Conversion successful!");
+            }
+        },
+        None => {
+            info!("No subcommand specified, starting Spire gateway...");
+
+            if let Err(e) = run_app(cli, reload_handle).await {
+                error!("Application failed to start: {e:?}");
+                return Err(e);
+            }
+        }
     }
 
     Ok(())
 }
 
-async fn run_app(reload_handle: Handle<filter::Targets, Registry>) -> Result<(), AppError> {
-    let cli = Cli::parse();
-    info!("CLI arguments parsed: {cli:?}");
-
+async fn run_app(
+    cli: Cli,
+    reload_handle: Handle<filter::Targets, Registry>,
+) -> Result<(), AppError> {
     let config = load_config(&cli).await?;
     info!("Configuration loaded successfully.");
     println!("Full configuration: {config:?}");
-
     reconfigure_logger(&reload_handle, &config);
     info!("Logger reconfigured to level: {}", config.get_log_level());
-
+    metrics::init().map_err(|e| AppError(e.to_string()))?;
     let admin_port = config.admin_port.unwrap_or(DEFAULT_ADMIN_PORT);
     let shared_config = SharedConfig::from_app_config(config);
 
@@ -88,7 +115,6 @@ fn reconfigure_logger(
     if !static_config.health_check_log_enabled.unwrap_or(false) {
         targets.push(("spire::health_check::health_check_task", LevelFilter::OFF));
     }
-
     let _ = reload_handle.modify(|filter| {
         *filter = filter::Targets::new()
             .with_targets(targets)
@@ -111,6 +137,7 @@ mod tests {
     async fn test_start_with_config_file_integration() {
         let cli = Cli {
             config_path: "conf/app_config.yaml".to_string(),
+            command: None,
         };
 
         let config_result = load_config(&cli).await;

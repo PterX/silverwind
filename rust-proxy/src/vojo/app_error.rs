@@ -32,11 +32,17 @@ macro_rules! app_error {
         AppError(format!($($arg)*))
     }
 }
+impl From<rustls_pki_types::pem::Error> for AppError {
+    fn from(error: rustls_pki_types::pem::Error) -> Self {
+        AppError(format!("PEM error: {error}"))
+    }
+}
 impl From<Status> for AppError {
     fn from(status: Status) -> Self {
         AppError(format!("Status error: {status}"))
     }
 }
+
 impl From<&str> for AppError {
     fn from(s: &str) -> Self {
         AppError(s.to_string())
@@ -85,9 +91,7 @@ impl From<delay_timer::error::TaskError> for AppError {
 }
 impl From<tracing_subscriber::util::TryInitError> for AppError {
     fn from(error: tracing_subscriber::util::TryInitError) -> Self {
-        AppError(format!(
-            "Tracing subscriber initialization error: {error}"
-        ))
+        AppError(format!("Tracing subscriber initialization error: {error}"))
     }
 }
 impl From<tracing_appender::rolling::InitError> for AppError {
