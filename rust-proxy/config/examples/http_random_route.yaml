@@ -1,3 +1,10 @@
+# =============================================================================
+# File: http_random_route.yaml
+# Description: Random backend selection for load distribution
+# =============================================================================
+# Randomly selects a backend for each request.
+# Simple and effective for evenly distributed traffic.
+
 log_level: info
 servers:
   - listen: 8084

@@ -1,3 +1,10 @@
+# =============================================================================
+# File: openapi_convert.yaml
+# Description: OpenAPI spec conversion to routing rules
+# =============================================================================
+# Demonstrates RESTful API routing patterns converted from OpenAPI spec.
+# Shows path+method combinations for CRUD operations.
+
 health_check_log_enabled: false
 admin_port: 8870
 log_level: debug

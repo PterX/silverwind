@@ -1,3 +1,10 @@
+# =============================================================================
+# File: http_header_based_route.yaml
+# Description: Header-based routing with text/regex/split matching
+# =============================================================================
+# Routes requests to different backends based on request header values.
+# Supports exact match, regex match, and comma-separated value matching.
+
 log_level: info
 servers:
   - listen: 8084

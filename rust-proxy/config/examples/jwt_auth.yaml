@@ -1,3 +1,10 @@
+# =============================================================================
+# File: jwt_auth.yaml
+# Description: JWT authentication middleware
+# =============================================================================
+# Validates JWT tokens in the Authorization header.
+# Supports HS256 algorithm with configurable secret.
+
 log_level: debug
 servers:
   - listen: 8084

@@ -1,3 +1,10 @@
+# =============================================================================
+# File: health_check.yaml
+# Description: Active/passive health checking with automatic failover
+# =============================================================================
+# Performs active HTTP health checks on backend services.
+# Unhealthy backends are automatically removed from rotation.
+
 log_level: info
 servers:
   - listen: 4486

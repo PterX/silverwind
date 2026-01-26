@@ -8,6 +8,7 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 extern crate derive_builder;
+use crate::command::examples_command::handle_examples_command;
 use crate::command::openapi_converter::handle_convert_command;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::vojo::cli::Cli;
@@ -58,6 +59,13 @@ async fn main() -> Result<(), AppError> {
                     return Err(e);
                 }
                 info!("Conversion successful!");
+            }
+            Commands::Examples(args) => {
+                info!("'examples' command detected");
+                if let Err(e) = handle_examples_command(args).await {
+                    error!("Failed to show examples: {e}");
+                    return Err(AppError::from(e.as_str()));
+                }
             }
         },
         None => {

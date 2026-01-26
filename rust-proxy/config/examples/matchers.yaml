@@ -1,3 +1,10 @@
+# =============================================================================
+# File: matchers.yaml
+# Description: Advanced request matching (path/host/header/method)
+# =============================================================================
+# Demonstrates multiple matchers: path prefix, exact host, header value, and HTTP methods.
+# Combining matchers creates precise routing rules.
+
 log_level: debug
 servers:
   - listen: 8084

@@ -1,3 +1,10 @@
+# =============================================================================
+# File: ratelimit_fixed_window.yaml
+# Description: Fixed window rate limiting algorithm
+# =============================================================================
+# Limits requests per fixed time window.
+# Simpler than token bucket, but allows bursts at window boundaries.
+
 log_level: debug
 servers:
   - listen: 8084

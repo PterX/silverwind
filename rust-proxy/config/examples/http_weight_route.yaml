@@ -1,3 +1,10 @@
+# =============================================================================
+# File: http_weight_route.yaml
+# Description: Weight-based load balancing across multiple backends
+# =============================================================================
+# Distributes traffic across backends based on configured weights.
+# Useful for canary deployments or gradual rollout.
+
 log_level: info
 servers:
   - listen: 8084

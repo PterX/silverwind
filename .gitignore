@@ -11,7 +11,7 @@
 *.pb
 # Dependency directories (remove the comment below to include it)
 vendor/
-
+.claude
 # Go workspace file
 go.work
 

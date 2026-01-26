@@ -1,0 +1,234 @@
+# =============================================================================
+# File: forward_ip_examples.yaml
+# Description: Forward client IP via X-Real-IP and X-Forwarded-For headers
+# =============================================================================
+# Demonstrates how to use forward_headers middleware to pass client IP to backend.
+# The forward_headers middleware automatically adds:
+# - X-Real-IP: The client's real IP address
+# - X-Forwarded-For: The client's IP (appended if already exists)
+
+log_level: info
+
+# Example 1: Basic Forward Headers
+# Forward client IP to a single backend
+servers:
+  - listen: 8080
+    protocol: http
+    routes:
+      - route_id: basic-forward-ip
+        matchers:
+          - kind: path
+            value: /
+            match_type: prefix
+        forward_to:
+          kind: single
+          target: http://192.168.1.100:8080
+        middlewares:
+          - kind: forward_headers
+
+# Example 2: Forward Headers with Multiple Backends (Random)
+# Forward client IP when using random backend selection
+#  - listen: 8081
+#    protocol: http
+#    routes:
+#      - route_id: random-forward-ip
+#        matchers:
+#          - kind: path
+#            value: /api
+#            match_type: prefix
+#        forward_to:
+#          - http://192.168.1.101:8080
+#          - http://192.168.1.102:8080
+#          - http://192.168.1.103:8080
+#        middlewares:
+#          - kind: forward_headers
+
+# Example 3: Forward Headers with Weight-based Routing
+# Forward client IP with weighted backend selection
+#  - listen: 8082
+#    protocol: http
+#    routes:
+#      - route_id: weight-forward-ip
+#        matchers:
+#          - kind: path
+#            value: /service
+#            match_type: prefix
+#        forward_to:
+#          kind: weight
+#          targets:
+#            - endpoint: http://192.168.1.201:8080
+#              weight: 70
+#            - endpoint: http://192.168.1.202:8080
+#              weight: 30
+#        middlewares:
+#          - kind: forward_headers
+
+# Example 4: Forward Headers with Round-robin
+# Forward client IP with round-robin backend selection
+#  - listen: 8083
+#    protocol: http
+#    routes:
+#      - route_id: poll-forward-ip
+#        matchers:
+#          - kind: path
+#            value: /backend
+#            match_type: prefix
+#        forward_to:
+#          kind: poll
+#          targets:
+#            - http://10.0.0.1:9000
+#            - http://10.0.0.2:9000
+#            - http://10.0.0.3:9000
+#        middlewares:
+#          - kind: forward_headers
+
+# Example 5: Forward Headers with Health Check
+# Forward client IP with active health checking
+#  - listen: 8084
+#    protocol: http
+#    routes:
+#      - route_id: health-check-forward-ip
+#        matchers:
+#          - kind: path
+#            value: /external
+#            match_type: prefix
+#        forward_to:
+#          kind: weight
+#          targets:
+#            - endpoint: http://203.0.113.10:8080
+#              weight: 1
+#            - endpoint: http://203.0.113.11:8080
+#              weight: 1
+#        health_check:
+#          kind: http
+#          path: /health
+#          interval: 10
+#          timeout: 5
+#        middlewares:
+#          - kind: forward_headers
+
+# Example 6: Forward Headers with Multiple Middlewares
+# Combine forward_headers with rate limiting and authentication
+#  - listen: 8085
+#    protocol: http
+#    routes:
+#      - route_id: multi-middleware-forward-ip
+#        matchers:
+#          - kind: path
+#            value: /secure
+#            match_type: prefix
+#        forward_to:
+#          kind: single
+#          target: http://192.168.1.100:8080
+#        middlewares:
+#          - kind: forward_headers
+#          - kind: rate_limit
+#            limiter: token_bucket
+#            rate_per_unit: 100
+#            unit:
+#              kind: Second
+#            capacity: 100
+#            scope:
+#              kind: IP
+#          - kind: authentication
+#            scheme: api_key
+#            key: X-API-Key
+#            value: your-secret-key
+
+# Example 7: Forward Headers with HTTPS
+# Forward client IP over HTTPS connection
+#  - listen: 8086
+#    protocol: https
+#    domains:
+#      - example.com
+#    routes:
+#      - route_id: https-forward-ip
+#        matchers:
+#          - kind: path
+#            value: /api
+#            match_type: prefix
+#        forward_to:
+#          kind: single
+#          target: http://192.168.1.100:8080
+#        middlewares:
+#          - kind: forward_headers
+
+# Example 8: Forward Headers with Header-based Routing
+# Forward client IP with header-based backend selection
+#  - listen: 8087
+#    protocol: http
+#    routes:
+#      - route_id: header-forward-ip
+#        matchers:
+#          - kind: path
+#            value: /
+#            match_type: prefix
+#        forward_to:
+#          kind: header_based
+#          header_name: X-Backend
+#          routes:
+#            - value: v1
+#              target: http://192.168.1.100:8081
+#            - value: v2
+#              target: http://192.168.1.100:8082
+#        middlewares:
+#          - kind: forward_headers
+
+# Example 9: Multiple Routes with Forward Headers
+# Different routes, all forwarding client IP
+#  - listen: 8088
+#    protocol: http
+#    routes:
+#      - route_id: api-v1
+#        matchers:
+#          - kind: path
+#            value: /api/v1
+#            match_type: prefix
+#        forward_to:
+#          kind: single
+#          target: http://192.168.1.100:8001
+#        middlewares:
+#          - kind: forward_headers
+#      - route_id: api-v2
+#        matchers:
+#          - kind: path
+#            value: /api/v2
+#            match_type: prefix
+#        forward_to:
+#          kind: single
+#          target: http://192.168.1.100:8002
+#        middlewares:
+#          - kind: forward_headers
+
+# Example 10: Forward Headers with Circuit Breaker
+# Forward client IP with circuit breaker protection
+#  - listen: 8089
+#    protocol: http
+#    routes:
+#      - route_id: circuit-breaker-forward-ip
+#        matchers:
+#          - kind: path
+#            value: /protected
+#            match_type: prefix
+#        forward_to:
+#          kind: single
+#          target: http://192.168.1.100:8080
+#        middlewares:
+#          - kind: forward_headers
+#          - kind: circuit_breaker
+#            failure_threshold: 5
+#            half_open_requests: 3
+#            recovery_timeout: 30
+
+# Headers Added by forward_headers:
+# ====================================
+# X-Real-IP: <client_ip>
+#   - Contains the direct client IP address
+#
+# X-Forwarded-For: <existing_ips>, <client_ip>
+#   - Appends client IP to existing chain
+#   - Creates new header if not present
+#
+# Example backend request headers:
+#   X-Real-IP: 203.0.113.50
+#   X-Forwarded-For: 203.0.113.50

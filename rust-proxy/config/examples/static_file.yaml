@@ -1,3 +1,10 @@
+# =============================================================================
+# File: static_file.yaml
+# Description: Static file serving with caching headers
+# =============================================================================
+# Serves static files from a local directory.
+# Adds cache headers for performance optimization.
+
 log_level: debug
 upstream_timeout_secs: 30000
 servers:

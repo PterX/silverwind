@@ -14,7 +14,34 @@ pub enum InputFormat {
     Swagger,
 }
 #[derive(Parser, Debug, Clone)]
-#[command(name = "Spire", version = crate_version!(), about = concat!("The Spire API Gateway v", crate_version!()), long_about = None) ]
+#[command(
+    name = "Spire",
+    version = crate_version!(),
+    about = concat!("The Spire API Gateway v", crate_version!()),
+    long_about = None,
+    after_help = "\
+GETTING STARTED:
+    spire -f config.yaml
+        Start the gateway with a configuration file
+
+    spire examples --list
+        List all available configuration examples
+
+    spire examples <name>
+        Display a specific configuration example
+
+    spire convert openapi.json -o config.yaml
+        Convert OpenAPI spec to gateway config
+
+CONFIGURATION:
+    Configuration files use YAML format. See 'spire examples' for available examples.
+    Default config file: config.yaml
+
+RESOURCES:
+    Documentation: https://github.com/lsk569937453/spire
+    Examples:      spire examples --list
+    Issue Tracker:  https://github.com/lsk569937453/spire/issues"
+)]
 pub struct Cli {
     #[arg(short = 'f', long, default_value = "config.yaml")]
     pub config_path: String,
@@ -28,6 +55,44 @@ pub enum Commands {
         about = "Converts an OpenAPI/Swagger file into a gateway configuration"
     )]
     Convert(ConvertArgs),
+    #[command(
+        visible_alias = "ex",
+        about = "List and display configuration examples",
+        long_about = "List all available configuration examples or display a specific example by name. Use --list to see all available examples.",
+        after_help = "\
+EXAMPLES:
+    spire examples --list
+        List all 21 available configuration examples with descriptions
+
+    spire examples app_config_simple
+        Display the minimal configuration example
+
+    spire examples forward_ip
+        Display IP forwarding examples (partial name match)
+
+    spire examples weight
+        Find and display weight-based routing example
+
+AVAILABLE CATEGORIES:
+    Basic Configuration
+        app_config_simple, app_config_https
+
+    Routing Strategies
+        http_weight_route, http_random_route, http_poll_route, http_header_based_route
+
+    Middleware Features
+        forward_ip_examples, request_headers, http_cors, jwt_auth, middle_wares
+
+    Rate Limiting
+        ratelimit_token_bucket, ratelimit_fixed_window
+
+    Advanced Features
+        health_check, circuit_breaker, matchers, reverse_proxy, tcp_proxy,
+        http_to_grpc, static_file, openapi_convert
+
+For more information, visit: https://github.com/lsk569937453/spire"
+    )]
+    Examples(ExamplesArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -39,6 +104,17 @@ pub struct ConvertArgs {
     pub output_file: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = InputFormat::Openapi)]
     pub format: InputFormat,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ExamplesArgs {
+    /// List all available examples
+    #[arg(short, long)]
+    pub list: bool,
+
+    /// Display a specific example by name (without .yaml extension)
+    #[arg(value_name = "EXAMPLE_NAME")]
+    pub name: Option<String>,
 }
 #[derive(Clone)]
 pub struct SharedConfig {
