@@ -1,5 +1,5 @@
 use crate::middleware::middlewares::Middleware;
-use crate::AppError;
+use crate::vojo::app_error::AppError;
 use bytes::Bytes;
 use http::header::{HeaderName, HeaderValue};
 use http::Request;
@@ -45,7 +45,6 @@ impl Middleware for RequestHeaders {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_add_and_remove_headers() {

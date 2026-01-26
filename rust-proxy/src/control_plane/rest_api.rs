@@ -246,12 +246,12 @@ mod tests {
     use crate::vojo::app_config::RouteConfig;
 
     use crate::vojo::base_response::BaseResponse;
-    use crate::AppConfig;
-    use crate::SharedConfig;
+
+    use crate::vojo::app_config::AppConfig;
+    use crate::vojo::cli::SharedConfig;
     use axum::body::Body;
     use axum::extract::Request;
     use http::header;
-
     use http::StatusCode;
     use std::collections::HashMap;
     use tower::ServiceExt;

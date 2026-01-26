@@ -1,5 +1,5 @@
 use crate::vojo::app_error::AppError;
-use crate::SharedConfig;
+use crate::vojo::cli::SharedConfig;
 use futures::FutureExt;
 use http::HeaderMap;
 use std::net::SocketAddr;
@@ -90,9 +90,7 @@ async fn check(
     let api_service = &app_config
         .api_service_config
         .get(&port)
-        .ok_or(AppError(format!(
-            "Can not get apiservice from port {port}"
-        )))?;
+        .ok_or(AppError(format!("Can not get apiservice from port {port}")))?;
 
     let service_config_clone = api_service;
 

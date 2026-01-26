@@ -2,7 +2,7 @@ use crate::middleware::middlewares::CheckResult;
 use crate::middleware::middlewares::Denial;
 use crate::middleware::middlewares::Middleware;
 use crate::utils::duration_urils::human_duration;
-use crate::AppError;
+use crate::vojo::app_error::AppError;
 use bytes::Bytes;
 use http::header;
 use http::HeaderMap;
@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
-
 #[derive(Debug, Clone, PartialEq)]
 enum State {
     Closed {
