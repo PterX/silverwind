@@ -10,6 +10,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 extern crate derive_builder;
 use crate::command::examples_command::handle_examples_command;
 use crate::command::openapi_converter::handle_convert_command;
+use crate::command::validate_command::handle_validate_command;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::vojo::cli::Cli;
 mod configuration_service;
@@ -66,6 +67,16 @@ async fn main() -> Result<(), AppError> {
                     error!("Failed to show examples: {e}");
                     return Err(AppError::from(e.as_str()));
                 }
+            }
+            Commands::Validate(args) => {
+                info!("'validate' command detected");
+                if let Err(e) = handle_validate_command(args).await {
+                    error!("Validation failed: {e}");
+                    // Exit with error code 1 for invalid config
+                    std::process::exit(1);
+                }
+                // Exit with success code
+                std::process::exit(0);
             }
         },
         None => {

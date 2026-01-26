@@ -30,12 +30,16 @@ GETTING STARTED:
     spire examples <name>
         Display a specific configuration example
 
+    spire validate -c config.yaml
+        Validate a configuration file before starting
+
     spire convert openapi.json -o config.yaml
         Convert OpenAPI spec to gateway config
 
 CONFIGURATION:
     Configuration files use YAML format. See 'spire examples' for available examples.
     Default config file: config.yaml
+    Use 'spire validate' to check your config before starting
 
 RESOURCES:
     Documentation: https://github.com/lsk569937453/spire
@@ -93,6 +97,41 @@ AVAILABLE CATEGORIES:
 For more information, visit: https://github.com/lsk569937453/spire"
     )]
     Examples(ExamplesArgs),
+    #[command(
+        visible_alias = "val",
+        about = "Validate a configuration file",
+        long_about = "Validate a Spire configuration file for syntax errors and structural issues.",
+        after_help = "\
+EXAMPLES:
+    spire validate
+        Validate the default config.yaml file
+
+    spire validate -c custom_config.yaml
+        Validate a specific configuration file
+
+    spire validate --config config/examples/app_config_simple.yaml
+        Validate with long option name
+
+    spire val -c config.yaml --verbose
+        Validate with detailed output (using alias)
+
+CHECKS PERFORMED:
+    - YAML syntax validation
+    - Configuration structure validation
+    - Type checking for all fields
+
+EXIT CODES:
+    0   Configuration is valid
+    1   Configuration is invalid (YAML syntax or deserialization error)
+    2   Error reading file (file not found, permission denied, etc.)
+
+COMMON ERRORS:
+    - Invalid YAML syntax (e.g., indentation issues, unmatched brackets)
+    - Unknown configuration fields
+    - Invalid field values (e.g., negative port numbers)
+    - Missing required fields"
+    )]
+    Validate(ValidateArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -115,6 +154,17 @@ pub struct ExamplesArgs {
     /// Display a specific example by name (without .yaml extension)
     #[arg(value_name = "EXAMPLE_NAME")]
     pub name: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ValidateArgs {
+    /// Configuration file to validate
+    #[arg(short, long, value_name = "FILE")]
+    pub config: Option<String>,
+
+    /// Show detailed validation output
+    #[arg(short, long)]
+    pub verbose: bool,
 }
 #[derive(Clone)]
 pub struct SharedConfig {
