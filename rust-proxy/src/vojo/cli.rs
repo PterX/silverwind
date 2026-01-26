@@ -132,6 +132,48 @@ COMMON ERRORS:
     - Missing required fields"
     )]
     Validate(ValidateArgs),
+    #[command(
+        visible_alias = "rel",
+        about = "Reload configuration from a file",
+        long_about = "Reload the gateway configuration by sending a new config file to the control plane API.",
+        after_help = "\
+EXAMPLES:
+    spire reload config.yaml
+        Reload configuration from config.yaml
+
+    spire reload new_config.yaml --port 8081
+        Reload from specific config file and connect to control plane on port 8081
+
+VALIDATION:
+    The reload command validates that the new configuration has the exact same set of listen ports
+    as the current configuration. Both the number of ports and the port values must match exactly.
+
+    This restriction ensures that the gateway continues listening on the same ports and provides
+    a smooth configuration update without interrupting existing connections."
+    )]
+    Reload(ReloadArgs),
+    #[command(
+        visible_alias = "q",
+        about = "Query current configuration from control plane",
+        long_about = "Fetch and display the current gateway configuration from the control plane API.",
+        after_help = "\
+EXAMPLES:
+    spire query
+        Query current configuration using default host and port
+
+    spire query --host 192.168.1.100 --port 9090
+        Query from specific control plane address
+
+OUTPUT:
+    The configuration is displayed in YAML format, showing all current settings including:
+    - Admin port
+    - Log level
+    - API service configurations
+    - Route configurations
+    - Health check settings
+    - And other configuration options"
+    )]
+    Query(QueryArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -166,6 +208,37 @@ pub struct ValidateArgs {
     #[arg(short, long)]
     pub verbose: bool,
 }
+
+#[derive(Args, Debug, Clone)]
+pub struct ReloadArgs {
+    /// Configuration file to load
+    #[arg(value_name = "FILE")]
+    pub config: String,
+
+    /// Control plane host
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Control plane port
+    #[arg(short, long, default_value = "8081")]
+    pub port: u16,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct QueryArgs {
+    /// Control plane host
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Control plane port
+    #[arg(short, long, default_value = "8081")]
+    pub port: u16,
+
+    /// Output format (yaml or json)
+    #[arg(short, long, default_value = "yaml")]
+    pub format: String,
+}
+
 #[derive(Clone)]
 pub struct SharedConfig {
     pub shared_data: Arc<Mutex<AppConfig>>,

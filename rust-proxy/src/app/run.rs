@@ -10,6 +10,8 @@ static GLOBAL: MiMalloc = MiMalloc;
 extern crate derive_builder;
 use crate::command::examples_command::handle_examples_command;
 use crate::command::openapi_converter::handle_convert_command;
+use crate::command::query_command::handle_query_command;
+use crate::command::reload_command::handle_reload_command;
 use crate::command::validate_command::handle_validate_command;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::vojo::cli::Cli;
@@ -64,6 +66,24 @@ pub async fn main_with_error() -> Result<(), AppError> {
                     std::process::exit(1);
                 }
                 // Exit with success code
+                std::process::exit(0);
+            }
+            Commands::Query(args) => {
+                info!("'query' command detected");
+                if let Err(e) = handle_query_command(args).await {
+                    error!("Query failed: {e}");
+                    return Err(AppError(e));
+                }
+                info!("Query successful!");
+                std::process::exit(0);
+            }
+            Commands::Reload(args) => {
+                info!("'reload' command detected");
+                if let Err(e) = handle_reload_command(args).await {
+                    error!("Reload failed: {e}");
+                    return Err(AppError(e));
+                }
+                info!("Reload successful!");
                 std::process::exit(0);
             }
         },
