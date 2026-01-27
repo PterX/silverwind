@@ -10,15 +10,15 @@ use crate::vojo::router::BaseRoute;
 use crate::vojo::router::StaticFileRoute;
 use crate::vojo::timeout_config::TimeoutConfig;
 use bytes::Bytes;
-use http::header;
-use http::header::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::Request;
 use http::StatusCode;
-use http_body_util::combinators::BoxBody;
+use http::header;
+use http::header::HeaderMap;
 use http_body_util::BodyExt;
 use http_body_util::Full;
+use http_body_util::combinators::BoxBody;
 use hyper::Response;
 use hyper::Uri;
 use mockall::automock;
@@ -68,7 +68,7 @@ impl DestinationResult {
 
     pub fn as_handling_result(&self) -> Option<&HandlingResult> {
         match self {
-            Self::Matched(ref handling_result) => Some(handling_result),
+            Self::Matched(handling_result) => Some(handling_result),
             _ => None,
         }
     }
@@ -93,7 +93,7 @@ impl ChainTrait for CommonCheckRequest {
             item.record_outcome(response);
         }
         for item in middlewares.iter() {
-            if let Ok(ref mut r) = response {
+            if let Ok(r) = response {
                 item.handle_response(req_path, r)?;
             }
         }
