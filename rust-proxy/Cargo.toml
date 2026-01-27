@@ -1,9 +1,21 @@
 [package]
-name = "spire"
-version = "0.0.25"
+name = "spire-proxy"   # crates.io 上唯一的名字
+version = "0.0.26"
 authors = ["lsk"]
 license = "Apache-2.0"
 edition = "2024"
+description = "A high-performance proxy server with control plane, supporting HTTP/HTTPS, gRPC, and advanced routing capabilities"
+repository = "https://github.com/lsk569937453/Spire"
+homepage = "https://github.com/lsk569937453/Spire"
+keywords = ["proxy", "http", "https", "grpc", "reverse-proxy"]
+categories = [ "network-programming",
+ "web-programming",
+ "web-programming::http-server"]
+readme = "README.md"
+
+[[bin]]
+name = "spire"
+path = "src/main.rs"
 
 [profile.dev]
 opt-level = 0
