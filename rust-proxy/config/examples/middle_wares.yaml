@@ -1,3 +1,10 @@
+# =============================================================================
+# File: middle_wares.yaml
+# Description: Multiple middleware combination (auth + rate limit + allow/deny + CORS)
+# =============================================================================
+# Shows how to chain multiple middlewares together.
+# Middlewares are executed in the order they are defined.
+
 servers:
   - listen: 8085
     protocol: http

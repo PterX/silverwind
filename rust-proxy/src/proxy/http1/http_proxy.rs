@@ -443,10 +443,11 @@ mod tests {
     use crate::middleware::authentication::BasicAuth;
     use crate::middleware::middlewares::MiddleWares;
     use crate::proxy::proxy_trait::{HandlingResult, MockChainTrait};
+    use crate::vojo::app_config::AppConfig;
     use crate::vojo::app_config::{ApiService, RouteConfig};
     use crate::vojo::matcher::MatcherRule;
+    use crate::vojo::router::StaticFileRoute;
     use crate::vojo::router::{BaseRoute, RandomRoute, Router};
-    use crate::{vojo::router::StaticFileRoute, AppConfig};
     use http::HeaderMap;
     use std::collections::HashMap;
     use std::net::IpAddr;

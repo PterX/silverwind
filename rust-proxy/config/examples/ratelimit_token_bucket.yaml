@@ -1,3 +1,10 @@
+# =============================================================================
+# File: ratelimit_token_bucket.yaml
+# Description: Token bucket rate limiting algorithm
+# =============================================================================
+# Limits request rate using token bucket algorithm.
+# Allows bursts up to capacity, then rate limits.
+
 log_level: debug
 servers:
   - listen: 8084

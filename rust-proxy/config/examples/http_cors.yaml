@@ -1,3 +1,10 @@
+# =============================================================================
+# File: http_cors.yaml
+# Description: CORS (Cross-Origin Resource Sharing) configuration
+# =============================================================================
+# Enables CORS for web applications accessing resources from different origins.
+# Customize allowed origins, methods, and headers as needed.
+
 servers:
   - listen: 8084
     protocol: http

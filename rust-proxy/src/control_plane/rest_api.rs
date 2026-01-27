@@ -174,6 +174,70 @@ async fn put_route_with_error(
     };
     Ok(serde_yaml::to_string(&data)?)
 }
+async fn reload_config(
+    State(shared_config): State<SharedConfig>,
+    req: Request,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    reload_config_with_error(shared_config, req).await
+}
+
+async fn reload_config_with_error(
+    shared_config: SharedConfig,
+    req: Request,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let (_, body) = req.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await?;
+    let new_config: AppConfig = serde_yaml::from_slice(&bytes)?;
+
+    // Get current config for port validation
+    let current_config = shared_config.shared_data.lock()?.clone();
+
+    // Validate: port count must match
+    let current_ports: std::collections::BTreeSet<i32> = current_config
+        .api_service_config
+        .keys()
+        .copied()
+        .collect();
+    let new_ports: std::collections::BTreeSet<i32> = new_config
+        .api_service_config
+        .keys()
+        .copied()
+        .collect();
+
+    if current_ports != new_ports {
+        return Err(AppError(format!(
+            "Port mismatch: current ports {:?} do not match new ports {:?}. \
+            The reload operation requires the exact same set of listen ports.",
+            current_ports, new_ports
+        )));
+    }
+
+    // Update the shared config
+    let mut rw_global_lock = shared_config.shared_data.lock()?;
+    *rw_global_lock = new_config.clone();
+
+    // Save to file asynchronously
+    let app_config = rw_global_lock.clone();
+    tokio::spawn(async {
+        if let Err(err) = save_config_to_file(app_config).await {
+            error!("Save file error,the error is {err}!");
+        }
+    });
+
+    let data = BaseResponse {
+        response_code: 0,
+        response_object: "Configuration reloaded successfully",
+    };
+    let json_str = serde_yaml::to_string(&data)?;
+
+    let response = Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(json_str)?;
+
+    Ok(response)
+}
+
 async fn save_config_to_file(app_config: AppConfig) -> Result<(), AppError> {
     let mut data = app_config;
     tokio::fs::create_dir_all(DEFAULT_TEMPORARY_DIR).await?;
@@ -223,6 +287,7 @@ pub fn get_router(shared_config: SharedConfig) -> Router {
         .route("/route/{id}", delete(delete_route))
         .route("/route", put(put_routex))
         .route("/letsEncryptCertificate", post(lets_encrypt_certificate))
+        .route("/reload", post(reload_config))
         .layer(axum::middleware::from_fn(print_request_response))
         .layer(CorsLayer::permissive())
         .with_state(shared_config)
@@ -246,12 +311,12 @@ mod tests {
     use crate::vojo::app_config::RouteConfig;
 
     use crate::vojo::base_response::BaseResponse;
-    use crate::AppConfig;
-    use crate::SharedConfig;
+
+    use crate::vojo::app_config::AppConfig;
+    use crate::vojo::cli::SharedConfig;
     use axum::body::Body;
     use axum::extract::Request;
     use http::header;
-
     use http::StatusCode;
     use std::collections::HashMap;
     use tower::ServiceExt;

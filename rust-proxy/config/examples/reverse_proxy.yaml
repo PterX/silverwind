@@ -1,3 +1,10 @@
+# =============================================================================
+# File: reverse_proxy.yaml
+# Description: Basic reverse proxy with forward headers
+# =============================================================================
+# Simple reverse proxy that forwards client IP via X-Real-IP header.
+# Use as a starting point for more complex configurations.
+
 log_level: info
 servers:
   - listen: 8084

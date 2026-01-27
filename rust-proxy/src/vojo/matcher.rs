@@ -83,12 +83,12 @@ impl MatcherRule {
     pub fn matches(&mut self, method: &Method, path: &str, headers: &HeaderMap) -> bool {
         match self {
             MatcherRule::Path {
-                ref value,
+                value,
                 match_type,
                 regex,
             } => match match_type {
                 PathMatchType::Prefix => {
-                    if path.starts_with(value) {
+                    if path.starts_with(value.as_str()) {
                         true
                     } else {
                         debug!(
@@ -157,7 +157,9 @@ impl MatcherRule {
                             }
                         }
                         Err(_) => {
-                            debug!("Host matching failed: 'Host' header contains non-visible ASCII characters");
+                            debug!(
+                                "Host matching failed: 'Host' header contains non-visible ASCII characters"
+                            );
                             false
                         }
                     }
@@ -171,11 +173,7 @@ impl MatcherRule {
                     false
                 }
             }
-            MatcherRule::Header {
-                ref name,
-                value,
-                regex,
-            } => {
+            MatcherRule::Header { name, value, regex } => {
                 if regex.is_none() {
                     *regex = Regex::new(value).ok();
                 }
@@ -217,7 +215,7 @@ impl MatcherRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use http::{header, HeaderValue, Method};
+    use http::{HeaderValue, Method, header};
     use std::collections::HashSet;
 
     #[test]

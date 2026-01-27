@@ -1,3 +1,4 @@
+use crate::constants::common_constants::DEFAULT_ADMIN_PORT;
 use crate::middleware::middlewares::CheckResult;
 use crate::middleware::middlewares::MiddleWares;
 use crate::middleware::middlewares::Middleware;
@@ -9,7 +10,6 @@ use crate::vojo::matcher::MatcherRule;
 use crate::vojo::router::deserialize_router;
 use crate::vojo::router::Router;
 use crate::vojo::timeout_config::TimeoutConfig;
-use crate::DEFAULT_ADMIN_PORT;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
@@ -571,7 +571,6 @@ mod tests {
         let json_str = serde_yaml::to_string(&app_config).unwrap();
         println!("{json_str}");
     }
-    use crate::DEFAULT_ADMIN_PORT;
     #[test]
     fn test_static_config_default() {
         let config = AppConfig::default();
@@ -579,6 +578,7 @@ mod tests {
         assert_eq!(config.admin_port, Some(DEFAULT_ADMIN_PORT));
         assert_eq!(config.log_level, None);
     }
+    use crate::constants::common_constants::DEFAULT_ADMIN_PORT;
 
     #[test]
     fn test_route_matching() {

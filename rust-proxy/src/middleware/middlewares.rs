@@ -6,7 +6,7 @@ use crate::middleware::circuit_breaker::CircuitBreaker;
 use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::rate_limit::Ratelimit;
 use crate::middleware::request_headers::RequestHeaders;
-use crate::AppError;
+use crate::vojo::app_error::AppError;
 use bytes::Bytes;
 use http::HeaderMap;
 use http::HeaderValue;

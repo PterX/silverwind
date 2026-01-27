@@ -1,13 +1,12 @@
 use crate::vojo::acme_client::LetsEntrypt;
 use crate::vojo::app_config::AcmeConfig;
+use crate::vojo::cli::SharedConfig;
 use crate::vojo::{app_error::AppError, base_response::BaseResponse};
-use crate::SharedConfig;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::Json;
 use mockall::automock;
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 struct LetsEncryptResponse {
     key_perm: String,

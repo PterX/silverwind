@@ -1,3 +1,10 @@
+# =============================================================================
+# File: http_to_grpc.yaml
+# Description: HTTP to gRPC transcoding with proto descriptors
+# =============================================================================
+# Transcodes HTTP/JSON requests to gRPC calls.
+# Requires compiled proto descriptor file (.pb).
+
 log_level: info
 servers:
   - listen: 8084

@@ -1,3 +1,10 @@
+# =============================================================================
+# File: circuit_breaker.yaml
+# Description: Circuit breaker pattern for fault tolerance
+# =============================================================================
+# Prevents cascading failures by stopping requests to failing backends.
+# Automatically recovers when backends become healthy again.
+
 log_level: debug
 servers:
   - listen: 8084

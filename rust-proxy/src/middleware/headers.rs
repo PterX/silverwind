@@ -1,5 +1,5 @@
 use crate::middleware::middlewares::Middleware;
-use crate::AppError;
+use crate::vojo::app_error::AppError;
 use bytes::Bytes;
 use http::header;
 use http::Response;

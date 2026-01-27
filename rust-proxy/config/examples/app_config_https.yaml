@@ -1,3 +1,10 @@
+# =============================================================================
+# File: app_config_https.yaml
+# Description: HTTPS proxy with TLS certificate configuration
+# =============================================================================
+# This example demonstrates HTTPS proxy with TLS certificate support.
+# Update the domain to match your certificate.
+
 log_level: trace
 servers:
   - listen: 8443

@@ -2,13 +2,13 @@ use crate::middleware::middlewares::CheckResult;
 use crate::middleware::middlewares::Denial;
 use crate::middleware::middlewares::Middleware;
 use crate::utils::duration_urils::human_duration;
-use crate::AppError;
+use crate::vojo::app_error::AppError;
 use bytes::Bytes;
-use http::header;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Response;
 use http::StatusCode;
+use http::header;
 use http_body_util::combinators::BoxBody;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
-
 #[derive(Debug, Clone, PartialEq)]
 enum State {
     Closed {
@@ -272,7 +271,9 @@ mod tests {
             assert_eq!(total_requests, 9);
             assert_eq!(failures, 4);
         } else {
-            panic!("The circuit breaker should be in the Closed state before the threshold is triggered");
+            panic!(
+                "The circuit breaker should be in the Closed state before the threshold is triggered"
+            );
         }
         assert!(
             cb.is_call_allowed(),
@@ -373,7 +374,7 @@ mod tests {
         for _ in 0..cb.half_open_max_requests - 1 {
             assert!(cb.is_call_allowed(), "Should allow probe");
 
-            if let State::HalfOpen {
+            if let &mut State::HalfOpen {
                 ref mut total_probes,
                 ..
             } = &mut cb.state
@@ -383,7 +384,7 @@ mod tests {
         }
 
         assert!(cb.is_call_allowed(), "Should allow the last probe");
-        if let State::HalfOpen {
+        if let &mut State::HalfOpen {
             ref mut total_probes,
             ..
         } = &mut cb.state

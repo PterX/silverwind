@@ -1,3 +1,10 @@
+# =============================================================================
+# File: tcp_proxy.yaml
+# Description: TCP layer proxy with IP filtering
+# =============================================================================
+# Proxies TCP connections with IP-based allow/deny rules.
+# Useful for database proxies or non-HTTP services.
+
 log_level: debug
 servers:
   - listen: 8084

@@ -1,3 +1,10 @@
+# =============================================================================
+# File: request_headers.yaml
+# Description: Add/remove custom request headers
+# =============================================================================
+# Adds custom headers to requests before forwarding to backend.
+# Also removes specified headers for security or privacy.
+
 log_level: debug
 servers:
   - listen: 8084

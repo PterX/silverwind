@@ -1,3 +1,10 @@
+# =============================================================================
+# File: http_poll_route.yaml
+# Description: Round-robin (poll) load balancing
+# =============================================================================
+# Distributes requests sequentially across backends.
+# Ensures even distribution when requests are similar in duration.
+
 servers:
   - listen: 8082
     protocol: http

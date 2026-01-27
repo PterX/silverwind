@@ -1,17 +1,16 @@
+use crate::app_error;
 use crate::control_plane::certificate_api::LetsEncryptActions;
 use crate::utils::fs_utils::get_domain_path;
 use crate::vojo::acme_client::LetsEntrypt;
 use crate::vojo::app_config::{AcmeConfig, AppConfig, ServiceType};
-use crate::{app_error, AppError};
+use crate::vojo::app_error::AppError;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc2822;
 use time::OffsetDateTime;
-use tokio::fs;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
-
 #[derive(Debug)]
 pub struct CertificateManager {
     config: Arc<AppConfig>,
@@ -196,7 +195,7 @@ impl CertificateManager {
 
         let base_path = get_domain_path(domain_name)?;
 
-        fs::create_dir_all(&base_path).await.map_err(|e| {
+        tokio::fs::create_dir_all(&base_path).await.map_err(|e| {
             app_error!(
                 "Failed to create certificate storage directory {:?}: {}",
                 base_path,
@@ -214,12 +213,12 @@ impl CertificateManager {
         info!(" - Successfully obtained certificate and private key.");
 
         info!(" - Saving new certificate to: {cert_path:?}");
-        fs::write(&cert_path, cert_pem).await.map_err(|e| {
+        tokio::fs::write(&cert_path, cert_pem).await.map_err(|e| {
             app_error!("Failed to write certificate file to {:?}: {}", cert_path, e)
         })?;
 
         info!(" - Saving new private key to: {key_path:?}");
-        fs::write(&key_path, key_pem)
+        tokio::fs::write(&key_path, key_pem)
             .await
             .map_err(|e| app_error!("Failed to write private key file to {:?}: {}", key_path, e))?;
 

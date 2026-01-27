@@ -16,7 +16,7 @@ use http::Response;
 use http::{Method, Request};
 use hyper::body::Bytes;
 
-use crate::SharedConfig;
+use crate::vojo::cli::SharedConfig;
 use rustls::ServerConfig;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
@@ -29,7 +29,6 @@ use tokio_rustls::server::TlsStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::{rustls, TlsAcceptor};
 use url::Url;
-
 pub struct GrpcProxy {
     pub port: i32,
     pub channel: mpsc::Receiver<()>,

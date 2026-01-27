@@ -1,5 +1,5 @@
 use crate::app_error;
-use crate::AppError;
+use crate::vojo::app_error::AppError;
 use home::home_dir;
 use std::path::PathBuf;
 pub fn get_domain_path(domain_name: &str) -> Result<PathBuf, AppError> {
