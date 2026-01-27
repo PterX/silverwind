@@ -33,8 +33,21 @@ GETTING STARTED:
     spire validate -c config.yaml
         Validate a configuration file before starting
 
-    spire convert openapi.json -o config.yaml
-        Convert OpenAPI spec to gateway config
+    spire convert openapi.yaml -o config.yaml
+        Convert OpenAPI/Swagger spec to gateway config
+
+    spire reload config.yaml
+        Reload configuration without restarting
+
+    spire query
+        Query current configuration from control plane
+
+COMMANDS:
+    convert (conv)   Convert OpenAPI/Swagger files to gateway configuration
+    examples (ex)    List and display configuration examples
+    query (q)        Query current configuration from control plane
+    reload (rel)     Reload configuration from a file
+    validate (val)   Validate a configuration file
 
 CONFIGURATION:
     Configuration files use YAML format. See 'spire examples' for available examples.
@@ -56,7 +69,39 @@ pub struct Cli {
 pub enum Commands {
     #[command(
         visible_alias = "conv",
-        about = "Converts an OpenAPI/Swagger file into a gateway configuration"
+        about = "Converts an OpenAPI/Swagger file into a gateway configuration",
+        long_about = "Convert an OpenAPI 3.0 or Swagger 2.0 specification file into a Spire gateway configuration file.",
+        after_help = "\
+EXAMPLES:
+    spire convert openapi.yaml
+        Convert OpenAPI spec and output to stdout
+
+    spire convert openapi.yaml -o config.yaml
+        Convert OpenAPI spec and save to config.yaml
+
+    spire conv swagger.json --format Swagger -o gateway.yaml
+        Convert Swagger spec using the 'conv' alias
+
+    spire convert petstore.yaml -o config/petstore.yaml
+        Convert and save to a specific directory
+
+SUPPORTED FORMATS:
+    Openapi (default)   OpenAPI 3.0.x specification files
+    Swagger             Swagger 2.0 specification files
+
+CONVERSION DETAILS:
+    - Extracts all paths and HTTP methods from the spec
+    - Creates route configurations with path and method matchers
+    - Path parameters (e.g., /users/{id}) are converted to regex matchers
+    - Uses server URLs from the spec as upstream endpoints
+    - If no servers are specified, defaults to http://127.0.0.1:8080
+    - Generates random router configuration for each route
+
+OUTPUT:
+    The converted configuration is printed to stdout in YAML format.
+    Use the -o option to save to a file instead.
+
+For more information: https://github.com/lsk569937453/spire"
     )]
     Convert(ConvertArgs),
     #[command(
