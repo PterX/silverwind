@@ -1,9 +1,3 @@
-#[cfg(not(target_env = "msvc"))]
-use mimalloc::MiMalloc;
-
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
 mod app;
 mod command;
 mod configuration_service;
