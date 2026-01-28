@@ -95,7 +95,7 @@ impl ChainTrait for CommonCheckRequest {
         }
         for item in middlewares.iter() {
             if let Ok(r) = response {
-                item.handle_response(req_path, r, inbound_headers.clone())?;
+                item.handle_response(req_path, r, inbound_headers.clone()).await?;
             }
         }
 

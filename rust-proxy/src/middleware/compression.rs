@@ -1,9 +1,12 @@
+use crate::middleware::middlewares::Middleware;
 use crate::vojo::app_error::AppError;
+use async_trait::async_trait;
 use bytes::Bytes;
-use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
+use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderMap, Response};
-use http_body_util::{combinators::BoxBody, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use std::io::Write;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -116,17 +119,23 @@ impl Compression {
     }
 
     /// 压缩数据
-    pub fn compress_data(&self, data: &[u8], compression_type: &CompressionType) -> Result<Vec<u8>, AppError> {
+    pub fn compress_data(
+        &self,
+        data: &[u8],
+        compression_type: &CompressionType,
+    ) -> Result<Vec<u8>, AppError> {
         match compression_type {
             CompressionType::Gzip => {
-                use flate2::write::GzEncoder;
                 use flate2::Compression;
+                use flate2::write::GzEncoder;
 
                 let level = self.level.clamp(0, 9) as u32;
                 let mut encoder = GzEncoder::new(Vec::new(), Compression::new(level));
-                encoder.write_all(data)
+                encoder
+                    .write_all(data)
                     .map_err(|e| AppError(format!("Gzip compression failed: {}", e)))?;
-                encoder.finish()
+                encoder
+                    .finish()
                     .map_err(|e| AppError(format!("Gzip finish failed: {}", e)))
             }
             CompressionType::Zstd => {
@@ -135,9 +144,11 @@ impl Compression {
                 let level = self.level.clamp(1, 22);
                 let mut encoder = ZstdEncoder::new(Vec::new(), level)
                     .map_err(|e| AppError(format!("Zstd encoder creation failed: {}", e)))?;
-                encoder.write_all(data)
+                encoder
+                    .write_all(data)
                     .map_err(|e| AppError(format!("Zstd compression failed: {}", e)))?;
-                encoder.finish()
+                encoder
+                    .finish()
                     .map_err(|e| AppError(format!("Zstd finish failed: {}", e)))
             }
             CompressionType::Both => {
@@ -175,7 +186,9 @@ impl Compression {
         }
 
         // 获取内容类型
-        let content_type = response.headers().get(CONTENT_TYPE)
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
             .and_then(|v| v.to_str().ok());
 
         // 检查是否应该压缩此内容类型
@@ -184,6 +197,95 @@ impl Compression {
         }
 
         Some(compression_type)
+    }
+}
+
+#[async_trait]
+impl Middleware for Compression {
+    async fn handle_response(
+        &self,
+        _req_path: &str,
+        response: &mut Response<BoxBody<Bytes, AppError>>,
+        inbound_headers: HeaderMap,
+    ) -> Result<(), AppError> {
+        debug!("[Compression] Checking if response should be compressed");
+
+        // 检查是否应该压缩
+        let compression_type = match self.should_compress_response(response, &inbound_headers) {
+            Some(ct) => ct,
+            None => {
+                debug!("[Compression] Compression not applicable for this response");
+                return Ok(());
+            }
+        };
+
+        debug!(
+            "[Compression] Response approved for compression with type: {:?}",
+            compression_type
+        );
+
+        // 打印原始响应头
+        debug!("[Compression] Original response headers:");
+        for (name, value) in response.headers().iter() {
+            if let Ok(v_str) = value.to_str() {
+                debug!("[Compression]   {}: {}", name, v_str);
+            } else {
+                debug!("[Compression]   {}: {:?}", name, value);
+            }
+        }
+        debug!("[Compression] Response status: {}", response.status());
+
+        // 收集响应体
+        let body = std::mem::replace(response.body_mut(), BoxBody::default());
+        let collected = body
+            .collect()
+            .await
+            .map_err(|e| AppError(format!("Failed to collect response body: {}", e)))?;
+        let data = collected.to_bytes();
+
+        // 检查数据大小是否达到最小压缩要求
+        debug!(
+            "[Compression] Response body size: {} bytes, min_size: {} bytes",
+            data.len(),
+            self.min_size
+        );
+        if data.len() < self.min_size {
+            // 恢复原始响应体
+            *response.body_mut() = Full::new(data).map_err(AppError::from).boxed();
+            debug!("[Compression] Body size too small, skipping compression");
+            return Ok(());
+        }
+
+        // 压缩数据
+        let compressed_data = self.compress_data(&data, &compression_type)?;
+
+        // 只有在压缩后数据更小时才使用压缩版本
+        if compressed_data.len() >= data.len() {
+            let data_len = data.len();
+            // 恢复原始响应体
+            *response.body_mut() = Full::new(data).map_err(AppError::from).boxed();
+            warn!(
+                "[Compression] Compressed size ({}) >= original size ({}), using original",
+                compressed_data.len(),
+                data_len
+            );
+            return Ok(());
+        }
+
+        // 移除 Content-Length，添加 Content-Encoding
+        response.headers_mut().remove(CONTENT_LENGTH);
+        response.headers_mut().insert(
+            CONTENT_ENCODING,
+            http::HeaderValue::from_static(self.get_encoding_value(&compression_type)),
+        );
+
+        // 替换响应体
+        *response.body_mut() = Full::new(Bytes::from(compressed_data))
+            .map_err(AppError::from)
+            .boxed();
+
+        debug!("[Compression] Compression applied successfully");
+        Ok(())
     }
 }
 

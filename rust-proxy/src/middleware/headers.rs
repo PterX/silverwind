@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use crate::middleware::middlewares::Middleware;
 use crate::vojo::app_error::AppError;
 use bytes::Bytes;
@@ -16,8 +17,9 @@ pub struct StaticResourceHeaders {
     expires: Duration,
     extensions: Vec<String>,
 }
+#[async_trait]
 impl Middleware for StaticResourceHeaders {
-    fn handle_response(
+    async fn handle_response(
         &self,
         req_path: &str,
         response: &mut Response<BoxBody<Bytes, AppError>>,

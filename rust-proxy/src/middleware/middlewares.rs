@@ -8,6 +8,7 @@ use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::rate_limit::Ratelimit;
 use crate::middleware::request_headers::RequestHeaders;
 use crate::vojo::app_error::AppError;
+use async_trait::async_trait;
 use bytes::Bytes;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -84,6 +85,7 @@ impl PartialEq for MiddleWares {
         }
     }
 }
+#[async_trait]
 pub trait Middleware: Send + Sync {
     fn handle_request(
         &mut self,
@@ -99,7 +101,7 @@ pub trait Middleware: Send + Sync {
     ) -> Result<CheckResult, AppError> {
         Ok(CheckResult::Allowed)
     }
-    fn handle_response(
+    async fn handle_response(
         &self,
         _req_path: &str,
         _response: &mut Response<BoxBody<Bytes, AppError>>,
@@ -140,6 +142,7 @@ impl CheckResult {
         }
     }
 }
+#[async_trait]
 impl Middleware for MiddleWares {
     fn handle_request(
         &mut self,
@@ -168,16 +171,16 @@ impl Middleware for MiddleWares {
         }
     }
 
-    fn handle_response(
+    async fn handle_response(
         &self,
         req_path: &str,
         response: &mut Response<BoxBody<Bytes, AppError>>,
         inbound_headers: HeaderMap,
     ) -> Result<(), AppError> {
         match self {
-            MiddleWares::Cors(mw) => mw.handle_response(req_path, response, inbound_headers),
-            MiddleWares::Headers(mw) => mw.handle_response(req_path, response, inbound_headers),
-            // 压缩在 handle_before_response 中处理
+            MiddleWares::Cors(mw) => mw.handle_response(req_path, response, inbound_headers).await,
+            MiddleWares::Headers(mw) => mw.handle_response(req_path, response, inbound_headers).await,
+            MiddleWares::Compression(mw) => mw.handle_response(req_path, response, inbound_headers).await,
             _ => Ok(()),
         }
     }
