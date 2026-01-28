@@ -103,6 +103,7 @@ pub trait Middleware: Send + Sync {
         &self,
         _req_path: &str,
         _response: &mut Response<BoxBody<Bytes, AppError>>,
+        inbound_headers: HeaderMap,
     ) -> Result<(), AppError> {
         Ok(())
     }
@@ -148,6 +149,7 @@ impl Middleware for MiddleWares {
         match self {
             MiddleWares::ForwardHeader(mw) => mw.handle_request(peer_addr, req),
             MiddleWares::RequestHeaders(mw) => mw.handle_request(peer_addr, req),
+
             _ => Ok(()),
         }
     }
@@ -170,10 +172,11 @@ impl Middleware for MiddleWares {
         &self,
         req_path: &str,
         response: &mut Response<BoxBody<Bytes, AppError>>,
+        inbound_headers: HeaderMap,
     ) -> Result<(), AppError> {
         match self {
-            MiddleWares::Cors(mw) => mw.handle_response(req_path, response),
-            MiddleWares::Headers(mw) => mw.handle_response(req_path, response),
+            MiddleWares::Cors(mw) => mw.handle_response(req_path, response, inbound_headers),
+            MiddleWares::Headers(mw) => mw.handle_response(req_path, response, inbound_headers),
             // 压缩在 handle_before_response 中处理
             _ => Ok(()),
         }
@@ -199,6 +202,7 @@ mod tests {
     use http::header;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
+    use x509_parser::asn1_rs::Header;
     #[test]
     fn test_rate_limit_middleware() {
         let mut headers = HeaderMap::new();
@@ -268,7 +272,7 @@ mod tests {
 
         let mut response = Response::builder().body(BoxBody::default()).unwrap();
 
-        let result = middleware.handle_response("", &mut response);
+        let result = middleware.handle_response("", &mut response, HeaderMap::new());
         assert!(result.is_ok());
 
         assert_eq!(

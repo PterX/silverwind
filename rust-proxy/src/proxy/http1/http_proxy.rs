@@ -1,6 +1,5 @@
 use crate::control_plane::cert_loader::load_tls_config;
 use crate::control_plane::cert_loader::watch_for_certificate_changes;
-use crate::middleware::middlewares::MiddleWares;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::proxy::http1::app_clients::AppClients;
 use crate::proxy::http1::websocket_proxy::server_upgrade;
@@ -10,15 +9,16 @@ use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::SharedConfig;
 use bytes::Bytes;
+use http::HeaderMap;
 use http::{HeaderValue, Uri};
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
+use hyper::Method;
+use hyper::StatusCode;
 use hyper::body::Incoming;
 use hyper::header;
 use hyper::header::{CONNECTION, SEC_WEBSOCKET_KEY};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper::Method;
-use hyper::StatusCode;
 use hyper::{Request, Response};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
@@ -275,8 +275,8 @@ async fn proxy(
 ) -> Result<Response<BoxBody<Bytes, AppError>>, AppError> {
     debug!("req: {req:?}");
 
-    // 克隆头部以避免借用问题
-    let inbound_headers = req.headers().clone();
+    let inbound_headers = req.headers();
+    let cloned_headers = inbound_headers.clone();
     let method = req.method();
     let uri = req.uri().clone();
     let mut spire_context = SpireContext::new(port, None);
@@ -286,7 +286,7 @@ async fn proxy(
             port,
             method,
             mapping_key.clone(),
-            &inbound_headers,
+            inbound_headers,
             uri,
             remote_addr,
             &mut spire_context,
@@ -370,7 +370,7 @@ async fn proxy(
                 _ => {
                     return Err(AppError(format!(
                         "Request time out,the uri is {request_path}"
-                    )))
+                    )));
                 }
             };
             response_result.map(|item| {
@@ -410,19 +410,19 @@ async fn proxy(
             Ok(response)
         }
     };
-
-    // 将 res 包装为 Result 以便传递给 handle_before_response
-    let mut res_result = res;
-
     if let Some(mut middlewares) = spire_context.middlewares {
         if !middlewares.is_empty() {
             chain_trait
-                .handle_before_response(&mut middlewares, request_path, &mut res_result, inbound_headers)
+                .handle_before_response(
+                    &mut middlewares,
+                    request_path,
+                    &mut res,
+                    cloned_headers.clone(),
+                )
                 .await?;
         }
     }
-
-    res_result
+    res
 }
 
 async fn route_file(
@@ -666,7 +666,7 @@ mod tests {
             .returning(|_, _, _| Err(AppError("test".to_string())));
         mock_chain_trait
             .expect_handle_before_response()
-            .returning(|_, _, _| Err(AppError("test".to_string())));
+            .returning(|_, _, _, _| Err(AppError("test".to_string())));
         let result = proxy(
             8080,
             shared_config,
