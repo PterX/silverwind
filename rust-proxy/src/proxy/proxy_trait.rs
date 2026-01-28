@@ -88,6 +88,7 @@ impl ChainTrait for CommonCheckRequest {
         req_path: &str,
 
         response: &mut Result<Response<BoxBody<Bytes, AppError>>, AppError>,
+        request_headers: HeaderMap,
     ) -> Result<(), AppError> {
         for item in middlewares.iter_mut() {
             item.record_outcome(response);
@@ -95,6 +96,77 @@ impl ChainTrait for CommonCheckRequest {
         for item in middlewares.iter() {
             if let Ok(r) = response {
                 item.handle_response(req_path, r)?;
+            }
+        }
+
+        // 处理压缩中间件
+        if let Some(comp) = middlewares.iter().find_map(|mw| {
+            if let MiddleWares::Compression(c) = mw {
+                Some(c)
+            } else {
+                None
+            }
+        }) {
+            // 检查是否需要压缩
+            if response.as_ref().ok()
+                .and_then(|r| comp.should_compress_response(r, &request_headers))
+                .is_some()
+            {
+                // 取出响应进行处理
+                let original_response = std::mem::replace(response, Err(AppError("placeholder".to_string())));
+                if let Ok(mut resp) = original_response {
+                    // 收集响应体
+                    let body = resp.body_mut();
+                    let collected = body.collect().await
+                        .map_err(|e| AppError(format!("Failed to collect response body: {}", e)))?;
+                    let data = collected.to_bytes();
+
+                    // 检查数据大小是否达到最小压缩要求
+                    if data.len() >= comp.min_size {
+                        // 获取压缩类型
+                        if let Some(compression_type) = comp.should_compress_response(&resp, &request_headers) {
+                            // 压缩数据
+                            if let Ok(compressed_data) = comp.compress_data(&data, &compression_type) {
+                                // 只有在压缩后数据更小时才使用压缩版本
+                                if compressed_data.len() < data.len() {
+                                    use http::header;
+
+                                    // 移除 Content-Length，添加 Content-Encoding
+                                    resp.headers_mut().remove(header::CONTENT_LENGTH);
+                                    resp.headers_mut().insert(
+                                        header::CONTENT_ENCODING,
+                                        http::HeaderValue::from_static(comp.get_encoding_value(&compression_type)),
+                                    );
+
+                                    // 创建新的响应体
+                                    let new_body = http_body_util::Full::new(bytes::Bytes::from(compressed_data))
+                                        .map_err(AppError::from)
+                                        .boxed();
+
+                                    // 替换响应体
+                                    let status = resp.status();
+                                    let headers = resp.headers().clone();
+                                    let version = resp.version();
+
+                                    let mut new_resp = Response::builder()
+                                        .status(status)
+                                        .version(version)
+                                        .body(new_body)?;
+
+                                    // 复制头部
+                                    for (name, value) in headers.iter() {
+                                        new_resp.headers_mut().append(name, value.clone());
+                                    }
+
+                                    *response = Ok(new_resp);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                    // 如果没有压缩，恢复原始响应
+                    *response = Ok(resp);
+                }
             }
         }
 
@@ -285,6 +357,7 @@ pub trait ChainTrait {
         middlewares: &mut Vec<MiddleWares>,
         req_path: &str,
         response: &mut Result<Response<BoxBody<Bytes, AppError>>, AppError>,
+        request_headers: HeaderMap,
     ) -> Result<(), AppError>;
     fn handle_preflight(
         &self,

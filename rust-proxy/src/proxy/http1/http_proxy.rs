@@ -1,5 +1,6 @@
 use crate::control_plane::cert_loader::load_tls_config;
 use crate::control_plane::cert_loader::watch_for_certificate_changes;
+use crate::middleware::middlewares::MiddleWares;
 use crate::monitor::prometheus_exporter::metrics;
 use crate::proxy::http1::app_clients::AppClients;
 use crate::proxy::http1::websocket_proxy::server_upgrade;
@@ -274,7 +275,8 @@ async fn proxy(
 ) -> Result<Response<BoxBody<Bytes, AppError>>, AppError> {
     debug!("req: {req:?}");
 
-    let inbound_headers = req.headers();
+    // 克隆头部以避免借用问题
+    let inbound_headers = req.headers().clone();
     let method = req.method();
     let uri = req.uri().clone();
     let mut spire_context = SpireContext::new(port, None);
@@ -284,7 +286,7 @@ async fn proxy(
             port,
             method,
             mapping_key.clone(),
-            inbound_headers,
+            &inbound_headers,
             uri,
             remote_addr,
             &mut spire_context,
@@ -408,14 +410,19 @@ async fn proxy(
             Ok(response)
         }
     };
+
+    // 将 res 包装为 Result 以便传递给 handle_before_response
+    let mut res_result = res;
+
     if let Some(mut middlewares) = spire_context.middlewares {
         if !middlewares.is_empty() {
             chain_trait
-                .handle_before_response(&mut middlewares, request_path, &mut res)
+                .handle_before_response(&mut middlewares, request_path, &mut res_result, inbound_headers)
                 .await?;
         }
     }
-    res
+
+    res_result
 }
 
 async fn route_file(

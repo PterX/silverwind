@@ -1,3 +1,4 @@
+use super::compression::Compression;
 use super::forward_header::ForwardHeader;
 use super::headers::StaticResourceHeaders;
 use crate::middleware::allow_deny_ip::AllowDenyIp;
@@ -62,6 +63,8 @@ pub enum MiddleWares {
     CircuitBreaker(#[serde(with = "arc_mutex_serde")] Arc<Mutex<CircuitBreaker>>),
     #[serde(rename = "request_headers")]
     RequestHeaders(RequestHeaders),
+    #[serde(rename = "compression")]
+    Compression(Compression),
 }
 impl PartialEq for MiddleWares {
     fn eq(&self, other: &Self) -> bool {
@@ -76,6 +79,7 @@ impl PartialEq for MiddleWares {
             (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => Arc::ptr_eq(a, b),
 
             (Self::RequestHeaders(a), Self::RequestHeaders(b)) => a == b,
+            (Self::Compression(a), Self::Compression(b)) => a == b,
             _ => false,
         }
     }
@@ -170,6 +174,7 @@ impl Middleware for MiddleWares {
         match self {
             MiddleWares::Cors(mw) => mw.handle_response(req_path, response),
             MiddleWares::Headers(mw) => mw.handle_response(req_path, response),
+            // 压缩在 handle_before_response 中处理
             _ => Ok(()),
         }
     }
