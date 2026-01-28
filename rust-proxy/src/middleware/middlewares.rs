@@ -1,3 +1,4 @@
+use super::compression::Compression;
 use super::forward_header::ForwardHeader;
 use super::headers::StaticResourceHeaders;
 use crate::middleware::allow_deny_ip::AllowDenyIp;
@@ -7,6 +8,7 @@ use crate::middleware::cors_config::CorsConfig;
 use crate::middleware::rate_limit::Ratelimit;
 use crate::middleware::request_headers::RequestHeaders;
 use crate::vojo::app_error::AppError;
+use async_trait::async_trait;
 use bytes::Bytes;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -62,6 +64,8 @@ pub enum MiddleWares {
     CircuitBreaker(#[serde(with = "arc_mutex_serde")] Arc<Mutex<CircuitBreaker>>),
     #[serde(rename = "request_headers")]
     RequestHeaders(RequestHeaders),
+    #[serde(rename = "compression")]
+    Compression(Compression),
 }
 impl PartialEq for MiddleWares {
     fn eq(&self, other: &Self) -> bool {
@@ -76,10 +80,12 @@ impl PartialEq for MiddleWares {
             (Self::CircuitBreaker(a), Self::CircuitBreaker(b)) => Arc::ptr_eq(a, b),
 
             (Self::RequestHeaders(a), Self::RequestHeaders(b)) => a == b,
+            (Self::Compression(a), Self::Compression(b)) => a == b,
             _ => false,
         }
     }
 }
+#[async_trait]
 pub trait Middleware: Send + Sync {
     fn handle_request(
         &mut self,
@@ -95,10 +101,11 @@ pub trait Middleware: Send + Sync {
     ) -> Result<CheckResult, AppError> {
         Ok(CheckResult::Allowed)
     }
-    fn handle_response(
+    async fn handle_response(
         &self,
         _req_path: &str,
         _response: &mut Response<BoxBody<Bytes, AppError>>,
+        inbound_headers: HeaderMap,
     ) -> Result<(), AppError> {
         Ok(())
     }
@@ -135,6 +142,7 @@ impl CheckResult {
         }
     }
 }
+#[async_trait]
 impl Middleware for MiddleWares {
     fn handle_request(
         &mut self,
@@ -144,6 +152,7 @@ impl Middleware for MiddleWares {
         match self {
             MiddleWares::ForwardHeader(mw) => mw.handle_request(peer_addr, req),
             MiddleWares::RequestHeaders(mw) => mw.handle_request(peer_addr, req),
+
             _ => Ok(()),
         }
     }
@@ -162,14 +171,16 @@ impl Middleware for MiddleWares {
         }
     }
 
-    fn handle_response(
+    async fn handle_response(
         &self,
         req_path: &str,
         response: &mut Response<BoxBody<Bytes, AppError>>,
+        inbound_headers: HeaderMap,
     ) -> Result<(), AppError> {
         match self {
-            MiddleWares::Cors(mw) => mw.handle_response(req_path, response),
-            MiddleWares::Headers(mw) => mw.handle_response(req_path, response),
+            MiddleWares::Cors(mw) => mw.handle_response(req_path, response, inbound_headers).await,
+            MiddleWares::Headers(mw) => mw.handle_response(req_path, response, inbound_headers).await,
+            MiddleWares::Compression(mw) => mw.handle_response(req_path, response, inbound_headers).await,
             _ => Ok(()),
         }
     }
@@ -194,6 +205,7 @@ mod tests {
     use http::header;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
+    use x509_parser::asn1_rs::Header;
     #[test]
     fn test_rate_limit_middleware() {
         let mut headers = HeaderMap::new();
@@ -263,7 +275,7 @@ mod tests {
 
         let mut response = Response::builder().body(BoxBody::default()).unwrap();
 
-        let result = middleware.handle_response("", &mut response);
+        let result = middleware.handle_response("", &mut response, HeaderMap::new());
         assert!(result.is_ok());
 
         assert_eq!(

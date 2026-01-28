@@ -9,15 +9,16 @@ use crate::proxy::proxy_trait::{CommonCheckRequest, RouterDestination};
 use crate::vojo::app_error::AppError;
 use crate::vojo::cli::SharedConfig;
 use bytes::Bytes;
+use http::HeaderMap;
 use http::{HeaderValue, Uri};
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
+use hyper::Method;
+use hyper::StatusCode;
 use hyper::body::Incoming;
 use hyper::header;
 use hyper::header::{CONNECTION, SEC_WEBSOCKET_KEY};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper::Method;
-use hyper::StatusCode;
 use hyper::{Request, Response};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
@@ -275,6 +276,7 @@ async fn proxy(
     debug!("req: {req:?}");
 
     let inbound_headers = req.headers();
+    let cloned_headers = inbound_headers.clone();
     let method = req.method();
     let uri = req.uri().clone();
     let mut spire_context = SpireContext::new(port, None);
@@ -368,7 +370,7 @@ async fn proxy(
                 _ => {
                     return Err(AppError(format!(
                         "Request time out,the uri is {request_path}"
-                    )))
+                    )));
                 }
             };
             response_result.map(|item| {
@@ -411,7 +413,12 @@ async fn proxy(
     if let Some(mut middlewares) = spire_context.middlewares {
         if !middlewares.is_empty() {
             chain_trait
-                .handle_before_response(&mut middlewares, request_path, &mut res)
+                .handle_before_response(
+                    &mut middlewares,
+                    request_path,
+                    &mut res,
+                    cloned_headers.clone(),
+                )
                 .await?;
         }
     }
@@ -659,7 +666,7 @@ mod tests {
             .returning(|_, _, _| Err(AppError("test".to_string())));
         mock_chain_trait
             .expect_handle_before_response()
-            .returning(|_, _, _| Err(AppError("test".to_string())));
+            .returning(|_, _, _, _| Err(AppError("test".to_string())));
         let result = proxy(
             8080,
             shared_config,

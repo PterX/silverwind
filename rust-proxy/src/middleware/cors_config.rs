@@ -1,20 +1,22 @@
+use async_trait::async_trait;
 use crate::middleware::middlewares::Middleware;
 use crate::vojo::app_error::AppError;
 use bytes::Bytes;
-use http::header;
+use http::HeaderMap;
 use http::HeaderValue;
 use http::Response;
+use http::header;
 use http_body_util::combinators::BoxBody;
 use regex::Regex;
-use serde::de;
-use serde::de::value::SeqAccessDeserializer;
-use serde::de::SeqAccess;
-use serde::de::Visitor;
-use serde::ser::SerializeSeq;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::Serializer;
+use serde::de;
+use serde::de::SeqAccess;
+use serde::de::Visitor;
+use serde::de::value::SeqAccessDeserializer;
+use serde::ser::SerializeSeq;
 use std::fmt;
 use std::fmt::Display;
 
@@ -27,11 +29,13 @@ pub struct CorsConfig {
     pub max_age: Option<i32>,
     pub options_passthrough: Option<bool>,
 }
+#[async_trait]
 impl Middleware for CorsConfig {
-    fn handle_response(
+    async fn handle_response(
         &self,
         _req_path: &str,
         response: &mut Response<BoxBody<Bytes, AppError>>,
+        inbound_headers: HeaderMap,
     ) -> Result<(), AppError> {
         self.handle_before_response(response)
     }

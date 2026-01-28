@@ -88,13 +88,14 @@ impl ChainTrait for CommonCheckRequest {
         req_path: &str,
 
         response: &mut Result<Response<BoxBody<Bytes, AppError>>, AppError>,
+        inbound_headers: HeaderMap,
     ) -> Result<(), AppError> {
         for item in middlewares.iter_mut() {
             item.record_outcome(response);
         }
         for item in middlewares.iter() {
             if let Ok(r) = response {
-                item.handle_response(req_path, r)?;
+                item.handle_response(req_path, r, inbound_headers.clone()).await?;
             }
         }
 
@@ -285,6 +286,7 @@ pub trait ChainTrait {
         middlewares: &mut Vec<MiddleWares>,
         req_path: &str,
         response: &mut Result<Response<BoxBody<Bytes, AppError>>, AppError>,
+        inbound_headers: HeaderMap,
     ) -> Result<(), AppError>;
     fn handle_preflight(
         &self,

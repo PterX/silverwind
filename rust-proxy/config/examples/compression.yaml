@@ -1,0 +1,85 @@
+# =============================================================================
+# File: compression.yaml
+# Description: HTTP response compression middleware example
+# =============================================================================
+# This example demonstrates how to enable response compression using gzip or zstd.
+# Compression is applied based on the client's Accept-Encoding header and content type.
+
+log_level: debug
+servers:
+  - listen: 8084
+    protocol: http
+    routes:
+      # Example 1: Gzip compression (default)
+      - route_id: gzip_route
+        matchers:
+          - kind: path
+            value: /api
+        forward_to: http://127.0.0.1:9393
+        middlewares:
+          - kind: compression
+            compression_type: gzip
+            level: 6              # Compression level (0-9 for gzip)
+            min_size: 1024        # Minimum response size in bytes to compress
+            enabled: true
+
+      # Example 2: Zstd compression (better compression ratio)
+      - route_id: zstd_route
+        matchers:
+          - kind: path
+            value: /data
+        forward_to: http://127.0.0.1:9393
+        middlewares:
+          - kind: compression
+            compression_type: zstd
+            level: 3              # Compression level (1-22 for zstd)
+            min_size: 512         # Smaller threshold for this route
+            enabled: true
+
+      # Example 3: Both compression (auto-select based on client support)
+      # Prefers zstd, falls back to gzip if client doesn't support zstd
+      - route_id: both_route
+        matchers:
+          - kind: path
+            value: /files
+        forward_to: http://127.0.0.1:9393
+        middlewares:
+          - kind: compression
+            compression_type: both
+            level: 6
+            min_size: 100
+            excluded_content_types:
+              - image/png
+              - image/jpeg
+              - video/
+              - application/zip
+            enabled: true
+
+# =============================================================================
+# Compression Configuration Options:
+# =============================================================================
+#
+# compression_type:
+#   - gzip: Uses gzip compression (widely supported)
+#   - zstd: Uses Zstandard compression (better ratio, newer)
+#   - both: Auto-selects zstd or gzip based on client Accept-Encoding
+#
+# level:
+#   - For gzip: 0-9 (default: 6)
+#     0 = no compression, 9 = maximum compression
+#   - For zstd: 1-22 (default: 3)
+#     Higher values = better compression but slower
+#
+# min_size:
+#   - Minimum response body size in bytes to trigger compression
+#   - Responses smaller than this are sent uncompressed
+#   - Default: 1024 (1KB)
+#
+# excluded_content_types:
+#   - List of content type prefixes to exclude from compression
+#   - Default excludes: images, videos, audio, already compressed files
+#   - Use prefix matching (e.g., "video/" matches all video types)
+#
+# enabled:
+#   - Enable or disable compression (default: true)
+# =============================================================================
