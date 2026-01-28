@@ -31,7 +31,7 @@ pub struct AppConfig {
     pub admin_port: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default = "default_upstream_timeout")]
     pub upstream_timeout_secs: Option<i32>,
     #[serde(
         rename = "servers",
@@ -39,6 +39,10 @@ pub struct AppConfig {
         serialize_with = "serialize_api_service_config"
     )]
     pub api_service_config: HashMap<i32, ApiService>,
+}
+
+fn default_upstream_timeout() -> Option<i32> {
+    Some(5000)
 }
 
 impl Default for AppConfig {
